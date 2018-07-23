@@ -70,6 +70,7 @@ set(HEADERS
   plan_expand_hypertable.h
   plan_add_hashagg.h
   process_utility.h
+  recluster.h
   scanner.h
   subspace_store.h
   tablespace.h
@@ -112,6 +113,7 @@ set(SOURCES
   planner_import.c
   planner_utils.c
   process_utility.c
+  recluster.c
   scanner.c
   sort_transform.c
   subspace_store.c
