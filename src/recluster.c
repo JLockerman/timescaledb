@@ -57,17 +57,6 @@
 #include "chunk_index.h"
 #include "recluster.h"
 
-/*
- * This struct is used to pass around the information on tables to be
- * clustered. We need this so we can make a list of them when invoked without
- * a specific table/index pair.
- */
-typedef struct
-{
-	Oid			tableOid;
-	Oid			indexOid;
-} RelToCluster;
-
 static void timescale_rebuild_relation(Relation OldHeap, Oid indexOid, bool verbose);
 static void copy_heap_data(Oid OIDNewHeap, Oid OIDOldHeap, Oid OIDOldIndex,
 			   bool verbose, bool *pSwapToastByContent,
@@ -81,18 +70,15 @@ static void reform_and_rewrite_tuple(HeapTuple tuple,
 static void finish_heap_swaps(Oid OIDOldHeap, Oid OIDNewHeap,
 				 List *new_index_oids,
 				 bool swap_toast_by_content,
-				 bool check_constraints,
 				 bool is_internal,
 				 TransactionId frozenXid,
-				 MultiXactId cutoffMulti,
-				 char newrelpersistence);
+				 MultiXactId cutoffMulti);
 
-static void swap_relation_files(Oid r1, Oid r2, bool target_is_pg_class,
+static void swap_relation_files(Oid r1, Oid r2,
 					bool swap_toast_by_content,
 					bool is_internal,
 					TransactionId frozenXid,
-					MultiXactId cutoffMulti,
-					Oid *mapped_tables);
+					MultiXactId cutoffMulti);
 
 /*
  * timescale_cluster_rel
@@ -309,9 +295,8 @@ timescale_rebuild_relation(Relation OldHeap, Oid indexOid, bool verbose)
 	 * rebuild the target's indexes and throw away the transient table.
 	 */
 	finish_heap_swaps(tableOid, OIDNewHeap, new_index_oids,
-					 swap_toast_by_content, false, true,
-					 frozenXid, cutoffMulti,
-					 relpersistence);
+					 swap_toast_by_content, true,
+					 frozenXid, cutoffMulti);
 }
 
 /*
@@ -732,22 +717,15 @@ static void
 finish_heap_swaps(Oid OIDOldHeap, Oid OIDNewHeap,
 				 List		*new_index_oids,
 				 bool swap_toast_by_content,
-				 bool check_constraints,
 				 bool is_internal,
 				 TransactionId frozenXid,
-				 MultiXactId cutoffMulti,
-				 char newrelpersistence)
+				 MultiXactId cutoffMulti)
 {
 	ObjectAddress object;
-	Oid			mapped_tables[4];
 	Relation	oldHeapRel;
-	int			i;
 	List 		*old_index_oids;
 	ListCell 	*old_index_cell;
 	ListCell 	*new_index_cell;
-
-	/* Zero out possible results from swapped_relation_files */
-	memset(mapped_tables, 0, sizeof(mapped_tables));
 
 	//TODO set deadlock time out to some large number
 	oldHeapRel = heap_open(OIDOldHeap, AccessExclusiveLock);
@@ -757,24 +735,20 @@ finish_heap_swaps(Oid OIDOldHeap, Oid OIDNewHeap,
 	 * Also set old heap's relfrozenxid to frozenXid.
 	 */
 	swap_relation_files(OIDOldHeap, OIDNewHeap,
-						(OIDOldHeap == RelationRelationId),
 						swap_toast_by_content, is_internal,
-						frozenXid, cutoffMulti, mapped_tables);
+						frozenXid, cutoffMulti);
 
 	/* Swap the contents of the indexes */
 	old_index_oids = RelationGetIndexList(oldHeapRel);
 	forboth(old_index_cell, old_index_oids, new_index_cell, new_index_oids)
 	{
-		Oid			index_mapped_tables[4];
 		Oid			old_index_oid = lfirst_oid(old_index_cell);
 		Oid			new_index_oid = lfirst_oid(new_index_cell);
-		memset(index_mapped_tables, 0, sizeof(index_mapped_tables));
 
 		swap_relation_files(old_index_oid, new_index_oid,
-						(old_index_oid == RelationRelationId),
 						//TODO
 						swap_toast_by_content, true,
-						frozenXid, cutoffMulti, mapped_tables);
+						frozenXid, cutoffMulti);
 	}
 	//TODO assert same length?
 	heap_close(oldHeapRel, NoLock);
@@ -791,15 +765,6 @@ finish_heap_swaps(Oid OIDOldHeap, Oid OIDNewHeap,
 	performDeletion(&object, DROP_RESTRICT, PERFORM_DELETION_INTERNAL);
 
 	/* performDeletion does CommandCounterIncrement at end */
-
-	/*
-	 * Now we must remove any relation mapping entries that we set up for the
-	 * transient table, as well as its toast table and toast index if any. If
-	 * we fail to do this before commit, the relmapper will complain about new
-	 * permanent map entries being added post-bootstrap.
-	 */
-	for (i = 0; OidIsValid(mapped_tables[i]); i++)
-		RelationMapRemoveMapping(mapped_tables[i]);
 
 	/*
 	 * At this point, everything is kosher except that, if we did toast swap
@@ -869,12 +834,11 @@ finish_heap_swaps(Oid OIDOldHeap, Oid OIDNewHeap,
  * having to look the information up again later in finish_heap_swap.
  */
 static void
-swap_relation_files(Oid r1, Oid r2, bool target_is_pg_class,
+swap_relation_files(Oid r1, Oid r2,
 					bool swap_toast_by_content,
 					bool is_internal,
 					TransactionId frozenXid,
-					MultiXactId cutoffMulti,
-					Oid *mapped_tables)
+					MultiXactId cutoffMulti)
 {
 	Relation	relRelation;
 	HeapTuple	reltup1,
@@ -902,83 +866,30 @@ swap_relation_files(Oid r1, Oid r2, bool target_is_pg_class,
 	relfilenode1 = relform1->relfilenode;
 	relfilenode2 = relform2->relfilenode;
 
-	if (OidIsValid(relfilenode1) && OidIsValid(relfilenode2))
+	if (!OidIsValid(relfilenode1) || !OidIsValid(relfilenode2))
+		elog(ERROR, "cannot recluster mapped relation \"%s\".",
+				 NameStr(relform1->relname));
+
+	/* swap relfilenodes, reltablespaces, relpersistence */
+
+	swaptemp = relform1->relfilenode;
+	relform1->relfilenode = relform2->relfilenode;
+	relform2->relfilenode = swaptemp;
+
+	swaptemp = relform1->reltablespace;
+	relform1->reltablespace = relform2->reltablespace;
+	relform2->reltablespace = swaptemp;
+
+	swptmpchr = relform1->relpersistence;
+	relform1->relpersistence = relform2->relpersistence;
+	relform2->relpersistence = swptmpchr;
+
+	/* Also swap toast links, if we're swapping by links */
+	if (!swap_toast_by_content)
 	{
-		/*
-		 * Normal non-mapped relations: swap relfilenodes, reltablespaces,
-		 * relpersistence
-		 */
-		Assert(!target_is_pg_class);
-
-		swaptemp = relform1->relfilenode;
-		relform1->relfilenode = relform2->relfilenode;
-		relform2->relfilenode = swaptemp;
-
-		swaptemp = relform1->reltablespace;
-		relform1->reltablespace = relform2->reltablespace;
-		relform2->reltablespace = swaptemp;
-
-		swptmpchr = relform1->relpersistence;
-		relform1->relpersistence = relform2->relpersistence;
-		relform2->relpersistence = swptmpchr;
-
-		/* Also swap toast links, if we're swapping by links */
-		if (!swap_toast_by_content)
-		{
-			swaptemp = relform1->reltoastrelid;
-			relform1->reltoastrelid = relform2->reltoastrelid;
-			relform2->reltoastrelid = swaptemp;
-		}
-	}
-	else
-	{
-		/*
-		 * Mapped-relation case.  Here we have to swap the relation mappings
-		 * instead of modifying the pg_class columns.  Both must be mapped.
-		 */
-		if (OidIsValid(relfilenode1) || OidIsValid(relfilenode2))
-			elog(ERROR, "cannot swap mapped relation \"%s\" with non-mapped relation",
-				 NameStr(relform1->relname));
-
-		/*
-		 * We can't change the tablespace nor persistence of a mapped rel, and
-		 * we can't handle toast link swapping for one either, because we must
-		 * not apply any critical changes to its pg_class row.  These cases
-		 * should be prevented by upstream permissions tests, so these checks
-		 * are non-user-facing emergency backstop.
-		 */
-		if (relform1->reltablespace != relform2->reltablespace)
-			elog(ERROR, "cannot change tablespace of mapped relation \"%s\"",
-				 NameStr(relform1->relname));
-		if (relform1->relpersistence != relform2->relpersistence)
-			elog(ERROR, "cannot change persistence of mapped relation \"%s\"",
-				 NameStr(relform1->relname));
-		if (!swap_toast_by_content &&
-			(relform1->reltoastrelid || relform2->reltoastrelid))
-			elog(ERROR, "cannot swap toast by links for mapped relation \"%s\"",
-				 NameStr(relform1->relname));
-
-		/*
-		 * Fetch the mappings --- shouldn't fail, but be paranoid
-		 */
-		relfilenode1 = RelationMapOidToFilenode(r1, relform1->relisshared);
-		if (!OidIsValid(relfilenode1))
-			elog(ERROR, "could not find relation mapping for relation \"%s\", OID %u",
-				 NameStr(relform1->relname), r1);
-		relfilenode2 = RelationMapOidToFilenode(r2, relform2->relisshared);
-		if (!OidIsValid(relfilenode2))
-			elog(ERROR, "could not find relation mapping for relation \"%s\", OID %u",
-				 NameStr(relform2->relname), r2);
-
-		/*
-		 * Send replacement mappings to relmapper.  Note these won't actually
-		 * take effect until CommandCounterIncrement.
-		 */
-		RelationMapUpdateMap(r1, relfilenode2, relform1->relisshared, false);
-		RelationMapUpdateMap(r2, relfilenode1, relform2->relisshared, false);
-
-		/* Pass OIDs of mapped r2 tables back to caller */
-		*mapped_tables++ = r2;
+		swaptemp = relform1->reltoastrelid;
+		relform1->reltoastrelid = relform2->reltoastrelid;
+		relform2->reltoastrelid = swaptemp;
 	}
 
 	/*
@@ -1017,31 +928,15 @@ swap_relation_files(Oid r1, Oid r2, bool target_is_pg_class,
 		relform2->relallvisible = swap_allvisible;
 	}
 
-	/*
-	 * Update the tuples in pg_class --- unless the target relation of the
-	 * swap is pg_class itself.  In that case, there is zero point in making
-	 * changes because we'd be updating the old data that we're about to throw
-	 * away.  Because the real work being done here for a mapped relation is
-	 * just to change the relation map settings, it's all right to not update
-	 * the pg_class rows in this case. The most important changes will instead
-	 * performed later, in finish_heap_swap() itself.
-	 */
-	if (!target_is_pg_class)
+	/* Update the tuples in pg_class. */
 	{
 		CatalogIndexState indstate;
-
 		indstate = CatalogOpenIndexes(relRelation);
 		CatalogTupleUpdateWithInfo(relRelation, &reltup1->t_self, reltup1,
-								   indstate);
+									indstate);
 		CatalogTupleUpdateWithInfo(relRelation, &reltup2->t_self, reltup2,
-								   indstate);
+									indstate);
 		CatalogCloseIndexes(indstate);
-	}
-	else
-	{
-		/* no update ... but we do still need relcache inval */
-		CacheInvalidateRelcacheByTuple(reltup1);
-		CacheInvalidateRelcacheByTuple(reltup2);
 	}
 
 	/*
@@ -1066,12 +961,10 @@ swap_relation_files(Oid r1, Oid r2, bool target_is_pg_class,
 				/* Recursively swap the contents of the toast tables */
 				swap_relation_files(relform1->reltoastrelid,
 									relform2->reltoastrelid,
-									target_is_pg_class,
 									swap_toast_by_content,
 									is_internal,
 									frozenXid,
-									cutoffMulti,
-									mapped_tables);
+									cutoffMulti);
 			}
 			else
 			{
@@ -1169,12 +1062,10 @@ swap_relation_files(Oid r1, Oid r2, bool target_is_pg_class,
 
 		swap_relation_files(toastIndex1,
 							toastIndex2,
-							target_is_pg_class,
 							swap_toast_by_content,
 							is_internal,
 							InvalidTransactionId,
-							InvalidMultiXactId,
-							mapped_tables);
+							InvalidMultiXactId);
 	}
 
 	/* Clean up. */
