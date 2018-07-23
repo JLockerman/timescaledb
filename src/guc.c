@@ -11,6 +11,13 @@ bool		guc_restoring = false;
 bool		guc_constraint_aware_append = true;
 int			guc_max_open_chunks_per_insert = 10;
 int			guc_max_cached_chunks_per_hypertable = 10;
+int			guc_timescale_cluster = 1;
+
+static const struct config_enum_entry guc_timescale_cluster_options[] = {
+	{"read_optimized", GUC_TIMESCALE_CLUSTER_READ_OPT, false},
+	{"native", GUC_TIMESCALE_CLUSTER_NATIVE, false},
+	{NULL, 0, false}
+};
 
 static void
 assign_max_cached_chunks_per_hypertable_hook(int newval, void *extra)
@@ -91,6 +98,17 @@ _guc_init(void)
 							NULL,
 							assign_max_cached_chunks_per_hypertable_hook,
 							NULL);
+
+	DefineCustomEnumVariable("timescaledb.cluster_method", "Choose which CLUSTER strategy to use.",
+							 "Choose between the builtin postgres CLUSTER and one which only acquires an AccessExclusive lock during the final swap.",
+							 &guc_timescale_cluster,
+							 GUC_TIMESCALE_CLUSTER_READ_OPT,
+							 guc_timescale_cluster_options,
+							 PGC_USERSET,
+							 0,
+							 NULL,
+							 NULL,
+							 NULL);
 }
 
 void

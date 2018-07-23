@@ -38,10 +38,12 @@
 #include "errors.h"
 #include "event_trigger.h"
 #include "extension.h"
+#include "guc.h"
 #include "hypercube.h"
 #include "hypertable_cache.h"
 #include "dimension_vector.h"
 #include "indexing.h"
+#include "recluster.h"
 #include "trigger.h"
 #include "utils.h"
 
@@ -1134,6 +1136,23 @@ find_clustered_index(Oid table_relid)
 	return index_relid;
 }
 
+static void recluster_chunk_by_index_map(ChunkIndexMapping *cim, bool verbose);
+static bool recluster_chunk(ClusterStmt *stmt, Cache *hcache, bool is_top_level);
+
+static void
+recluster_permission_check(Hypertable *ht, bool is_top_level)
+{
+	if (!pg_class_ownercheck(ht->main_table_relid, GetUserId()))
+		aclcheck_error(ACLCHECK_NOT_OWNER, ACL_KIND_CLASS,
+					   get_rel_name(ht->main_table_relid));
+
+	/*
+	 * If CLUSTER is run inside a user transaction block; we bail out or
+	 * otherwise we'd be holding locks way too long.
+	 */
+	PreventTransactionChain(is_top_level, "CLUSTER");
+}
+
 /*
  * Cluster a hypertable.
  *
@@ -1149,47 +1168,43 @@ process_cluster_start(Node *parsetree, ProcessUtilityContext context)
 	ClusterStmt *stmt = (ClusterStmt *) parsetree;
 	Cache	   *hcache;
 	Hypertable *ht;
+	bool		is_top_level = (context == PROCESS_UTILITY_TOPLEVEL);
+	bool		reclustered = false;
 
 	Assert(IsA(stmt, ClusterStmt));
 
+
 	/* If this is a re-cluster on all tables, there is nothing we need to do */
+	/* TODO should we take charge and run our cluster on our tables? */
 	if (NULL == stmt->relation)
 		return false;
 
 	hcache = hypertable_cache_pin();
 	ht = hypertable_cache_get_entry_rv(hcache, stmt->relation);
 
-	if (NULL != ht)
+	/* If the relation wasn't a hypertable maybe it's a chunk. */
+	if (NULL == ht)
 	{
-		bool		is_top_level = (context == PROCESS_UTILITY_TOPLEVEL);
+		reclustered = recluster_chunk(stmt, hcache, is_top_level);
+	}
+	else
+	{
 		Oid			index_relid;
 		List	   *chunk_indexes;
 		ListCell   *lc;
 		MemoryContext old,
 					mcxt;
 
-		if (!pg_class_ownercheck(ht->main_table_relid, GetUserId()))
-			aclcheck_error(ACLCHECK_NOT_OWNER, ACL_KIND_CLASS,
-						   get_rel_name(ht->main_table_relid));
-
-		/*
-		 * If CLUSTER is run inside a user transaction block; we bail out or
-		 * otherwise we'd be holding locks way too long.
-		 */
-		PreventTransactionChain(is_top_level, "CLUSTER");
+		recluster_permission_check(ht, is_top_level);
 
 		if (NULL == stmt->indexname)
 			index_relid = find_clustered_index(ht->main_table_relid);
 		else
-			index_relid = get_relname_relid(stmt->indexname,
-											get_rel_namespace(ht->main_table_relid));
+			index_relid = get_relname_relid(stmt->indexname, get_rel_namespace(ht->main_table_relid));
 
+		/* Let regular process utility handle invalid indexes */
 		if (!OidIsValid(index_relid))
-		{
-			/* Let regular process utility handle */
-			cache_release(hcache);
-			return false;
-		}
+			goto recluster_cleanup;
 
 		/*
 		 * The list of chunks and their indexes need to be on a memory context
@@ -1222,16 +1237,8 @@ process_cluster_start(Node *parsetree, ProcessUtilityContext context)
 			/* functions in indexes may want a snapshot set */
 			PushActiveSnapshot(GetTransactionSnapshot());
 
-			/*
-			 * We must mark each chunk index as clustered before calling
-			 * cluster_rel() because it expects indexes that need to be
-			 * rechecked (due to new transaction) to already have that mark
-			 * set
-			 */
-			chunk_index_mark_clustered(cim->chunkoid, cim->indexoid);
+			recluster_chunk_by_index_map(cim, stmt->verbose);
 
-			/* Do the job. */
-			cluster_rel(cim->chunkoid, cim->indexoid, true, stmt->verbose);
 			PopActiveSnapshot();
 			CommitTransactionCommand();
 		}
@@ -1240,12 +1247,101 @@ process_cluster_start(Node *parsetree, ProcessUtilityContext context)
 		/* Start a new transaction for the cleanup work. */
 		StartTransactionCommand();
 
+		/* Mark the hypertable main table as clustered. */
+		chunk_index_mark_clustered(ht->main_table_relid, index_relid);
+
 		/* Clean up working storage */
 		MemoryContextDelete(mcxt);
+		reclustered = true;
 	}
 
+recluster_cleanup:
 	cache_release(hcache);
-	return false;
+	return reclustered;
+}
+
+/* 
+ * Find the index to recluster a chunk on based on a possibly NULL indexname
+ * returns NULL if no such index is found
+ */
+static ChunkIndexMapping *
+chunk_get_recluster_index(Hypertable *ht, Chunk *chunk, char *indexname)
+{
+	/*
+	 * Index search order:
+	 * 1. Explicitly named index
+	 * 2. Chunk cluster index
+	 * 3. Hypertable cluster index
+	 */
+	if(NULL != indexname)
+	{
+		Oid index_relid = get_relname_relid(indexname, get_rel_namespace(chunk->table_id));
+		if (OidIsValid(index_relid))
+			return chunk_index_get_by_indexrelid(chunk, index_relid);
+ 		
+		index_relid = get_relname_relid(indexname, get_rel_namespace(ht->main_table_relid));
+		if (OidIsValid(index_relid))
+			return chunk_index_get_by_hypertable_indexrelid(chunk, index_relid);
+	}
+
+	Oid index_relid = find_clustered_index(chunk->table_id);
+	if(OidIsValid(index_relid))
+		return chunk_index_get_by_indexrelid(chunk, index_relid);	
+
+	index_relid = find_clustered_index(ht->main_table_relid);
+	if(OidIsValid(index_relid))
+		return chunk_index_get_by_hypertable_indexrelid(chunk, index_relid);
+
+	return NULL;
+}
+
+static bool
+recluster_chunk(ClusterStmt *stmt, Cache *hcache, bool is_top_level)
+{
+	Chunk	   *chunk;
+	Hypertable *ht;
+	ChunkIndexMapping *cim = NULL;
+	Oid			chunk_id = RangeVarGetRelid(stmt->relation, NoLock, true);
+
+	if (!OidIsValid(chunk_id))
+		return false;
+
+	chunk = chunk_get_by_relid(chunk_id, 0, false);
+
+	/* If the relation wasn't a chunk let postgres's cluster handle it. */
+	if (NULL == chunk)
+		return false;
+
+	ht = hypertable_cache_get_entry(hcache, chunk->hypertable_relid);
+
+	recluster_permission_check(ht, is_top_level);
+
+	cim = chunk_get_recluster_index(ht, chunk, stmt->indexname);
+	
+	/* let cluster handle no valid index cases */
+	if(NULL == cim)
+		return false;
+
+	Assert(cim->chunkoid == chunk_id);
+	recluster_chunk_by_index_map(cim, stmt->verbose);
+	return true;
+}
+
+static void
+recluster_chunk_by_index_map(ChunkIndexMapping *cim, bool verbose)
+{
+	/*
+	 * We must mark each chunk index as clustered before calling cluster_rel()
+	 * because it expects indexes that need to be rechecked (due to new
+	 * transaction) to already have that mark set
+	 */
+	chunk_index_mark_clustered(cim->chunkoid, cim->indexoid);
+
+	/* Do the job. */
+	if (GUC_TIMESCALE_CLUSTER_READ_OPT == guc_timescale_cluster)
+		timescale_recluster_rel(cim->chunkoid, cim->indexoid, verbose);
+	else
+		cluster_rel(cim->chunkoid, cim->indexoid, true, verbose);
 }
 
 /*
