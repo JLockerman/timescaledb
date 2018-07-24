@@ -1105,6 +1105,7 @@ process_cluster_start(Node *parsetree, ProcessUtilityContext context)
 	Assert(IsA(stmt, ClusterStmt));
 
 	/* If this is a re-cluster on all tables, there is nothing we need to do */
+	//TODO should we take charge and run our cluster on our tables?
 	if (NULL == stmt->relation)
 		return false;
 
@@ -1194,9 +1195,12 @@ process_cluster_start(Node *parsetree, ProcessUtilityContext context)
 		hcache->release_on_commit = true;
 		/* Start a new transaction for the cleanup work. */
 		StartTransactionCommand();
+		chunk_index_mark_clustered(ht->main_table_relid, index_relid);
 
 		/* Clean up working storage */
 		MemoryContextDelete(mcxt);
+		cache_release(hcache);
+		return true;
 	}
 
 	cache_release(hcache);

@@ -1,6 +1,6 @@
 /*-------------------------------------------------------------------------
  *
- * cluster.c
+ * recluster.c
  *
  * CLUSTER command which only blocks concurrent writes not reads.
  * Based on an edited version of src/backend/commands/cluster.c from
@@ -192,7 +192,7 @@ timescale_recluster_rel(Oid tableOid, Oid indexOid, bool recheck, bool verbose)
 	if (OldHeap->rd_rel->relisshared)
 		ereport(ERROR,
 				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-				 errmsg("cannot cluster a shared catalog")));
+				 errmsg("cannot recluster a shared catalog")));
 
 	/*
 	 * Don't process temp tables of other backends ... their local buffer
@@ -203,7 +203,7 @@ timescale_recluster_rel(Oid tableOid, Oid indexOid, bool recheck, bool verbose)
 		if (OidIsValid(indexOid))
 			ereport(ERROR,
 					(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-					 errmsg("cannot cluster temporary tables of other sessions")));
+					 errmsg("cannot recluster temporary tables of other sessions")));
 		else
 			ereport(ERROR,
 					(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
@@ -496,13 +496,13 @@ copy_heap_data(Oid OIDNewHeap, Oid OIDOldHeap, Oid OIDOldIndex, bool verbose,
 	/* Log what we're doing */
 	if (indexScan != NULL)
 		ereport(elevel,
-				(errmsg("clustering \"%s.%s\" using index scan on \"%s\"",
+				(errmsg("reclustering \"%s.%s\" using index scan on \"%s\"",
 						get_namespace_name(RelationGetNamespace(OldHeap)),
 						RelationGetRelationName(OldHeap),
 						RelationGetRelationName(OldIndex))));
 	else if (tuplesort != NULL)
 		ereport(elevel,
-				(errmsg("clustering \"%s.%s\" using sequential scan and sort",
+				(errmsg("reclustering \"%s.%s\" using sequential scan and sort",
 						get_namespace_name(RelationGetNamespace(OldHeap)),
 						RelationGetRelationName(OldHeap))));
 	else
