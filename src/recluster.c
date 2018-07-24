@@ -44,6 +44,7 @@
 #include "storage/smgr.h"
 #include "utils/acl.h"
 #include "utils/fmgroids.h"
+#include "utils/guc.h"
 #include "utils/inval.h"
 #include "utils/lsyscache.h"
 #include "utils/memutils.h"
@@ -727,7 +728,36 @@ finish_heap_swaps(Oid OIDOldHeap, Oid OIDNewHeap,
 	ListCell 	*old_index_cell;
 	ListCell 	*new_index_cell;
 
-	//TODO set deadlock time out to some large number
+
+	/*
+	 * There's a risk of deadlock if some other process is also trying to
+	 * upgrade their lock in the same manner as us, at this time. Since our
+	 * transaction has performed a large amount of work, and only needs to be
+	 * run once per chunk, we do not want to abort it due to this deadlock.
+	 * To prevent abort we set our `deadlock_timeout` to a large value in the
+	 * expectation that the other process will timeout and abort first.
+	 * Currently we set `deadlock_timeout` to 1 hour, as this should be longer
+	 * than any other normal process, while still allowing the system to make
+	 * progress in the event of a real deadlock.
+	 * As this is the last lock we grab, and the setting is local to our
+	 * transaction we do not bother changing the guc back.
+	 */
+	//TODO is this the right timeout value?
+	int config_change = set_config_option("deadlock_timeout",
+                              "3600000",
+                              PGC_SUSET,
+                              PGC_S_SESSION,
+                              GUC_ACTION_LOCAL,
+                              true, 0, false);
+	if (config_change == 0)
+		ereport(ERROR,
+				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+				 errmsg("deadlock_timeout guc does not exist.")));
+	else if (config_change < 0)
+		ereport(ERROR,
+				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+				 errmsg("could not set deadlock_timeout guc.")));
+
 	oldHeapRel = heap_open(OIDOldHeap, AccessExclusiveLock);
 
 	/*
