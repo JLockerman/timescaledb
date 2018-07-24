@@ -42,6 +42,7 @@
 #include "hypertable_cache.h"
 #include "dimension_vector.h"
 #include "indexing.h"
+#include "recluster.h"
 #include "trigger.h"
 #include "utils.h"
 
@@ -1182,7 +1183,10 @@ process_cluster_start(Node *parsetree, ProcessUtilityContext context)
 			chunk_index_mark_clustered(cim->chunkoid, cim->indexoid);
 
 			/* Do the job. */
-			cluster_rel(cim->chunkoid, cim->indexoid, true, stmt->verbose);
+			if(false) //TODO get from guc
+				cluster_rel(cim->chunkoid, cim->indexoid, true, stmt->verbose);
+			else
+				timescale_recluster_rel(cim->chunkoid, cim->indexoid, true, stmt->verbose);
 			PopActiveSnapshot();
 			CommitTransactionCommand();
 		}

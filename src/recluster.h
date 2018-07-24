@@ -3,15 +3,15 @@
 
 /*-------------------------------------------------------------------------
  *
- * cluster.h
+ * recluster.h //TODO what shoould this file be called
  *	  Intercept cluster command to only block concurrent writes instead of
  *    blocking both reads and writes as postgres does
  *
  *-------------------------------------------------------------------------
  */
 
-#include "nodes/parsenodes.h"
 
+#include <postgres.h>
 #include "nodes/parsenodes.h"
 #include "storage/lock.h"
 #include "utils/relcache.h"
