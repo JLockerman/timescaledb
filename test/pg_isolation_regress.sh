@@ -29,6 +29,4 @@ else
     done
 fi
 
-echo cmd ${PG_ISOLATION_REGRESS} ${TESTS}
-
 ${PG_ISOLATION_REGRESS} $@ ${PG_ISOLATION_REGRESS_OPTS} ${TESTS}
