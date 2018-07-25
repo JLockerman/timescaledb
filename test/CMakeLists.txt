@@ -46,6 +46,10 @@ set(PG_REGRESS_OPTS_INOUT
   --inputdir=${TEST_INPUT_DIR}
   --outputdir=${TEST_OUTPUT_DIR})
 
+set(PG_ISOLATION_REGRESS_OPTS_INOUT
+  --inputdir=${TEST_INPUT_DIR}/isolation
+  --outputdir=${TEST_OUTPUT_DIR}/isolation)
+
 set(PG_REGRESS_OPTS_TEMP_INSTANCE
   --port=${TEST_PGPORT_TEMP_INSTANCE}
   --temp-instance=${TEST_CLUSTER}
@@ -98,7 +102,7 @@ add_custom_target(isocheck
   ${CMAKE_CURRENT_SOURCE_DIR}/pg_isolation_regress.sh
   ${PG_REGRESS_OPTS_BASE}
   ${PG_REGRESS_OPTS_EXTRA}
-  ${PG_REGRESS_OPTS_INOUT}
+  ${PG_ISOLATION_REGRESS_OPTS_INOUT}
   --load-extension=timescaledb
   ${PG_REGRESS_OPTS_TEMP_INSTANCE}
   USES_TERMINAL)
@@ -123,7 +127,7 @@ add_custom_target(isochecklocal
   ${CMAKE_CURRENT_SOURCE_DIR}/pg_isolation_regress.sh
   ${PG_REGRESS_OPTS_BASE}
   ${PG_REGRESS_OPTS_EXTRA}
-  ${PG_REGRESS_OPTS_INOUT}
+  ${PG_ISOLATION_REGRESS_OPTS_INOUT}
   --load-extension=timescaledb
   ${PG_REGRESS_OPTS_LOCAL_INSTANCE}
   USES_TERMINAL)

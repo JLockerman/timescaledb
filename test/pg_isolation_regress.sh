@@ -9,8 +9,8 @@ TESTS=${TESTS:-}
 
 if [[ -z ${TESTS} ]]; then
     if [[ -z ${ISOLATION_TEST_SCHEDULE} ]]; then
-        for t in ${EXE_DIR}/specs/*.spec; do
-            t=${t##${EXE_DIR}/specs/}
+        for t in ${EXE_DIR}/isolation/specs/*.spec; do
+            t=${t##${EXE_DIR}/isolation/specs/}
             t=${t%.spec}
             TESTS="${TESTS} $t"
         done
@@ -20,8 +20,8 @@ if [[ -z ${TESTS} ]]; then
 else
     FILTER=${TESTS}
     TESTS=
-    for t in ${EXE_DIR}/specs/*.spec; do
-        t=${t##${EXE_DIR}/specs/}
+    for t in ${EXE_DIR}/isolation/specs/*.spec; do
+        t=${t##${EXE_DIR}/isolation/specs/}
         t=${t%.spec}
         if [[ $FILTER = *"$t"* ]]; then
             TESTS="${TESTS} $t"
