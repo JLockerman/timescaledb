@@ -40,3 +40,15 @@ CLUSTER VERBOSE cluster_test using cluster_test_time_location_idx;
 SELECT indexrelid::regclass, indisclustered
 FROM pg_index
 WHERE indisclustered = true;
+
+-- Set guc to run basic cluster
+UPDATE pg_settings SET setting = false WHERE name = 'timescaledb.non_locking_cluster';
+
+-- and old cluster should be run
+CLUSTER VERBOSE cluster_test using cluster_test_time_location_idx;
+
+-- Set guc back
+UPDATE pg_settings SET setting = reset_val WHERE name = 'timescaledb.non_locking_cluster';
+
+-- and new cluster should be run
+CLUSTER VERBOSE cluster_test using cluster_test_time_location_idx;

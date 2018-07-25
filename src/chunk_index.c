@@ -960,8 +960,6 @@ chunk_index_duplicate(Oid src_chunkrelid, Oid dest_chunkrelid)
 
 		constraint_oid = get_index_constraint(cim->parent_indexoid);
 
-		//TODO ensure chunk_relation_index_create has no side effects and just
-		//     creates the index
 		new_chunk_indexrelid = chunk_relation_index_create(hypertable_rel, chunk_index_rel,
 														dest_chunk_rel, OidIsValid(constraint_oid));
 		new_index_oids = lappend_oid(new_index_oids, new_chunk_indexrelid);

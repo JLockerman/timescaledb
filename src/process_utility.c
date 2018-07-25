@@ -38,6 +38,7 @@
 #include "errors.h"
 #include "event_trigger.h"
 #include "extension.h"
+#include "guc.h"
 #include "hypercube.h"
 #include "hypertable_cache.h"
 #include "dimension_vector.h"
@@ -1112,7 +1113,12 @@ process_cluster_start(Node *parsetree, ProcessUtilityContext context)
 	hcache = hypertable_cache_pin();
 	ht = hypertable_cache_get_entry_rv(hcache, stmt->relation);
 
-	if (NULL != ht)
+	if(NULL == ht)
+	{
+		cache_release(hcache);
+		return false;
+	}
+
 	{
 		bool		is_top_level = (context == PROCESS_UTILITY_TOPLEVEL);
 		Oid			index_relid;
@@ -1184,10 +1190,11 @@ process_cluster_start(Node *parsetree, ProcessUtilityContext context)
 			chunk_index_mark_clustered(cim->chunkoid, cim->indexoid);
 
 			/* Do the job. */
-			if(false) //TODO get from guc
-				cluster_rel(cim->chunkoid, cim->indexoid, true, stmt->verbose);
-			else
+			if(guc_non_locking_cluster)
 				timescale_recluster_rel(cim->chunkoid, cim->indexoid, true, stmt->verbose);
+			else
+				cluster_rel(cim->chunkoid, cim->indexoid, true, stmt->verbose);
+
 			PopActiveSnapshot();
 			CommitTransactionCommand();
 		}
@@ -1195,6 +1202,8 @@ process_cluster_start(Node *parsetree, ProcessUtilityContext context)
 		hcache->release_on_commit = true;
 		/* Start a new transaction for the cleanup work. */
 		StartTransactionCommand();
+
+		/* Mark the hypertable main table as clustered. */
 		chunk_index_mark_clustered(ht->main_table_relid, index_relid);
 
 		/* Clean up working storage */
@@ -1202,9 +1211,6 @@ process_cluster_start(Node *parsetree, ProcessUtilityContext context)
 		cache_release(hcache);
 		return true;
 	}
-
-	cache_release(hcache);
-	return false;
 }
 
 /*

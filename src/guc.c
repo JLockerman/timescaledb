@@ -9,6 +9,7 @@ bool		guc_disable_optimizations = false;
 bool		guc_optimize_non_hypertables = false;
 bool		guc_restoring = false;
 bool		guc_constraint_aware_append = true;
+bool		guc_non_locking_cluster = true;
 int			guc_max_open_chunks_per_insert = 10;
 int			guc_max_cached_chunks_per_hypertable = 10;
 
@@ -58,6 +59,16 @@ _guc_init(void)
 							 true,
 							 PGC_USERSET
 							 ,
+							 0,
+							 NULL,
+							 NULL,
+							 NULL);
+
+	DefineCustomBoolVariable("timescaledb.non_locking_cluster", "Enable cluster with reduced locking.",
+							 "Enable cluster which only acquires an AccessExclusive lock during the final swap.",
+							 &guc_non_locking_cluster,
+							 true,
+							 PGC_USERSET,
 							 0,
 							 NULL,
 							 NULL,
