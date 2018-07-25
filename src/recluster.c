@@ -723,7 +723,6 @@ finish_heap_swaps(Oid OIDOldHeap, Oid OIDNewHeap,
 	 * grab, and the setting is local to our transaction we do not bother
 	 * changing the guc back.
 	 */
-	/* TODO is this the right timeout value? */
 	int			config_change = set_config_option("deadlock_timeout",
 												  RECLUSTER_ACCESS_EXCLUSIVE_DEADLOCK_TIMEOUT,
 												  PGC_SUSET,
@@ -751,6 +750,7 @@ finish_heap_swaps(Oid OIDOldHeap, Oid OIDNewHeap,
 						frozenXid, cutoffMulti);
 
 	/* Swap the contents of the indexes */
+	Assert(list_length(old_index_oids) == list_length(new_index_oids));
 	forboth(old_index_cell, old_index_oids, new_index_cell, new_index_oids)
 	{
 		Oid			old_index_oid = lfirst_oid(old_index_cell);
@@ -761,7 +761,6 @@ finish_heap_swaps(Oid OIDOldHeap, Oid OIDNewHeap,
 							swap_toast_by_content, true,
 							frozenXid, cutoffMulti);
 	}
-	/* TODO assert same length? */
 	heap_close(oldHeapRel, NoLock);
 
 	/* Destroy new heap with old filenode */
