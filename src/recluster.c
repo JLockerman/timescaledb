@@ -69,11 +69,11 @@ static void reform_and_rewrite_tuple(HeapTuple tuple,
 						 bool newRelHasOids, RewriteState rwstate);
 
 static void finish_heap_swaps(Oid OIDOldHeap, Oid OIDNewHeap,
-				 List *new_index_oids,
-				 bool swap_toast_by_content,
-				 bool is_internal,
-				 TransactionId frozenXid,
-				 MultiXactId cutoffMulti);
+				  List *new_index_oids,
+				  bool swap_toast_by_content,
+				  bool is_internal,
+				  TransactionId frozenXid,
+				  MultiXactId cutoffMulti);
 
 static void swap_relation_files(Oid r1, Oid r2,
 					bool swap_toast_by_content,
@@ -100,7 +100,7 @@ timescale_recluster_rel(Oid tableOid, Oid indexOid, bool recheck, bool verbose)
 {
 	Relation	OldHeap;
 
-	if(!OidIsValid(indexOid))
+	if (!OidIsValid(indexOid))
 		elog(ERROR, "Recluster must specify an index.");
 
 	/* Check for user-requested abort. */
@@ -143,8 +143,9 @@ timescale_recluster_rel(Oid tableOid, Oid indexOid, bool recheck, bool verbose)
 		 * check in the "recheck" case is appropriate (which currently means
 		 * somebody is executing a database-wide CLUSTER), because there is
 		 * another check in cluster() which will stop any attempt to cluster
-		 * remote temp tables by name.  There is another check in timescale_cluster_rel
-		 * which is redundant, but we leave it for extra safety.
+		 * remote temp tables by name.  There is another check in
+		 * timescale_cluster_rel which is redundant, but we leave it for extra
+		 * safety.
 		 */
 		if (RELATION_IS_OTHER_TEMP(OldHeap))
 		{
@@ -214,7 +215,7 @@ timescale_recluster_rel(Oid tableOid, Oid indexOid, bool recheck, bool verbose)
 	 * Also check for active uses of the relation in the current transaction,
 	 * including open scans and pending AFTER trigger events.
 	 */
-	//TODO is this check needed/valid?
+	/* TODO is this check needed/valid? */
 	CheckTableNotInUse(OldHeap, "CLUSTER");
 
 	/* Check heap and index are valid to cluster on */
@@ -262,7 +263,7 @@ timescale_rebuild_relation(Relation OldHeap, Oid indexOid, bool verbose)
 	Oid			tableOid = RelationGetRelid(OldHeap);
 	Oid			tableSpace = OldHeap->rd_rel->reltablespace;
 	Oid			OIDNewHeap;
-	List 		*new_index_oids;
+	List	   *new_index_oids;
 	char		relpersistence;
 	bool		swap_toast_by_content;
 	TransactionId frozenXid;
@@ -273,7 +274,7 @@ timescale_rebuild_relation(Relation OldHeap, Oid indexOid, bool verbose)
 
 	/* Remember info about rel before closing OldHeap */
 	relpersistence = OldHeap->rd_rel->relpersistence;
-	if(IsSystemRelation(OldHeap))
+	if (IsSystemRelation(OldHeap))
 		elog(ERROR, "Cannot recluster a system catalog.");
 
 	/* Close relcache entry, but keep lock until transaction commit */
@@ -296,8 +297,8 @@ timescale_rebuild_relation(Relation OldHeap, Oid indexOid, bool verbose)
 	 * rebuild the target's indexes and throw away the transient table.
 	 */
 	finish_heap_swaps(tableOid, OIDNewHeap, new_index_oids,
-					 swap_toast_by_content, true,
-					 frozenXid, cutoffMulti);
+					  swap_toast_by_content, true,
+					  frozenXid, cutoffMulti);
 }
 
 /*
@@ -450,7 +451,7 @@ copy_heap_data(Oid OIDNewHeap, Oid OIDOldHeap, Oid OIDOldIndex, bool verbose,
 	*pFreezeXid = FreezeXid;
 	*pCutoffMulti = MultiXactCutoff;
 
-	if(IsSystemRelation(OldHeap))
+	if (IsSystemRelation(OldHeap))
 		elog(ERROR, "Cannot recluster a system relation.");
 
 	/* Initialize the rewrite operation */
@@ -716,39 +717,40 @@ copy_heap_data(Oid OIDNewHeap, Oid OIDOldHeap, Oid OIDOldIndex, bool verbose,
  */
 static void
 finish_heap_swaps(Oid OIDOldHeap, Oid OIDNewHeap,
-				 List		*new_index_oids,
-				 bool swap_toast_by_content,
-				 bool is_internal,
-				 TransactionId frozenXid,
-				 MultiXactId cutoffMulti)
+				  List *new_index_oids,
+				  bool swap_toast_by_content,
+				  bool is_internal,
+				  TransactionId frozenXid,
+				  MultiXactId cutoffMulti)
 {
 	ObjectAddress object;
 	Relation	oldHeapRel;
-	List 		*old_index_oids;
-	ListCell 	*old_index_cell;
-	ListCell 	*new_index_cell;
+	List	   *old_index_oids;
+	ListCell   *old_index_cell;
+	ListCell   *new_index_cell;
 
 
 	/*
 	 * There's a risk of deadlock if some other process is also trying to
 	 * upgrade their lock in the same manner as us, at this time. Since our
 	 * transaction has performed a large amount of work, and only needs to be
-	 * run once per chunk, we do not want to abort it due to this deadlock.
-	 * To prevent abort we set our `deadlock_timeout` to a large value in the
+	 * run once per chunk, we do not want to abort it due to this deadlock. To
+	 * prevent abort we set our `deadlock_timeout` to a large value in the
 	 * expectation that the other process will timeout and abort first.
 	 * Currently we set `deadlock_timeout` to 1 hour, as this should be longer
 	 * than any other normal process, while still allowing the system to make
-	 * progress in the event of a real deadlock.
-	 * As this is the last lock we grab, and the setting is local to our
-	 * transaction we do not bother changing the guc back.
+	 * progress in the event of a real deadlock. As this is the last lock we
+	 * grab, and the setting is local to our transaction we do not bother
+	 * changing the guc back.
 	 */
-	//TODO is this the right timeout value?
-	int config_change = set_config_option("deadlock_timeout",
-                              "101000",
-                              PGC_SUSET,
-                              PGC_S_SESSION,
-                              GUC_ACTION_LOCAL,
-                              true, 0, false);
+	/* TODO is this the right timeout value? */
+	int			config_change = set_config_option("deadlock_timeout",
+												  "101000",
+												  PGC_SUSET,
+												  PGC_S_SESSION,
+												  GUC_ACTION_LOCAL,
+												  true, 0, false);
+
 	if (config_change == 0)
 		ereport(ERROR,
 				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
@@ -776,11 +778,11 @@ finish_heap_swaps(Oid OIDOldHeap, Oid OIDNewHeap,
 		Oid			new_index_oid = lfirst_oid(new_index_cell);
 
 		swap_relation_files(old_index_oid, new_index_oid,
-						//TODO
-						swap_toast_by_content, true,
-						frozenXid, cutoffMulti);
+		/* TODO */
+							swap_toast_by_content, true,
+							frozenXid, cutoffMulti);
 	}
-	//TODO assert same length?
+	/* TODO assert same length? */
 	heap_close(oldHeapRel, NoLock);
 
 	/* Destroy new heap with old filenode */
@@ -898,7 +900,7 @@ swap_relation_files(Oid r1, Oid r2,
 
 	if (!OidIsValid(relfilenode1) || !OidIsValid(relfilenode2))
 		elog(ERROR, "cannot recluster mapped relation \"%s\".",
-				 NameStr(relform1->relname));
+			 NameStr(relform1->relname));
 
 	/* swap relfilenodes, reltablespaces, relpersistence */
 
@@ -961,11 +963,12 @@ swap_relation_files(Oid r1, Oid r2,
 	/* Update the tuples in pg_class. */
 	{
 		CatalogIndexState indstate;
+
 		indstate = CatalogOpenIndexes(relRelation);
 		CatalogTupleUpdateWithInfo(relRelation, &reltup1->t_self, reltup1,
-									indstate);
+								   indstate);
 		CatalogTupleUpdateWithInfo(relRelation, &reltup2->t_self, reltup2,
-									indstate);
+								   indstate);
 		CatalogCloseIndexes(indstate);
 	}
 

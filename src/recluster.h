@@ -17,6 +17,6 @@
 #include "utils/relcache.h"
 
 extern void timescale_recluster_rel(Oid tableOid, Oid indexOid, bool recheck,
-			bool verbose);
+						bool verbose);
 
-#endif	/* TIMESCALEDB_RECLUSTER_H */
+#endif							/* TIMESCALEDB_RECLUSTER_H */

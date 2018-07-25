@@ -936,13 +936,13 @@ chunk_index_duplicate(Oid src_chunkrelid, Oid dest_chunkrelid)
 	Relation	hypertable_rel = NULL;
 	Relation	src_chunk_rel;
 	Relation	dest_chunk_rel;
-	List 		*index_oids;
+	List	   *index_oids;
 	Oid			constraint_oid;
-	ListCell 	*index_elem;
-	List		*new_index_oids = NIL;
-	Chunk 		*src_chunk;
+	ListCell   *index_elem;
+	List	   *new_index_oids = NIL;
+	Chunk	   *src_chunk;
 
-	//TODO lock order?
+	/* TODO lock order? */
 	src_chunk_rel = relation_open(src_chunkrelid, AccessShareLock);
 	dest_chunk_rel = heap_open(dest_chunkrelid, ShareLock);
 
@@ -950,7 +950,7 @@ chunk_index_duplicate(Oid src_chunkrelid, Oid dest_chunkrelid)
 
 	hypertable_rel = heap_open(src_chunk->hypertable_relid, AccessShareLock);
 
-	index_oids =  RelationGetIndexList(src_chunk_rel);
+	index_oids = RelationGetIndexList(src_chunk_rel);
 	foreach(index_elem, index_oids)
 	{
 		Oid			new_chunk_indexrelid;
@@ -961,7 +961,7 @@ chunk_index_duplicate(Oid src_chunkrelid, Oid dest_chunkrelid)
 		constraint_oid = get_index_constraint(cim->parent_indexoid);
 
 		new_chunk_indexrelid = chunk_relation_index_create(hypertable_rel, chunk_index_rel,
-														dest_chunk_rel, OidIsValid(constraint_oid));
+														   dest_chunk_rel, OidIsValid(constraint_oid));
 		new_index_oids = lappend_oid(new_index_oids, new_chunk_indexrelid);
 		relation_close(chunk_index_rel, AccessShareLock);
 	}

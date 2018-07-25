@@ -13,11 +13,11 @@ int			guc_max_open_chunks_per_insert = 10;
 int			guc_max_cached_chunks_per_hypertable = 10;
 int			guc_timescale_cluster = 1;
 
- static const struct config_enum_entry guc_timescale_cluster_options[] = {
-     {"read_optimized", GUC_TIMESCALE_CLUSTER_READ_OPT, false},
-     {"native", GUC_TIMESCALE_CLUSTER_NATIVE, false},
-     {NULL, 0, false}
- };
+static const struct config_enum_entry guc_timescale_cluster_options[] = {
+	{"read_optimized", GUC_TIMESCALE_CLUSTER_READ_OPT, false},
+	{"native", GUC_TIMESCALE_CLUSTER_NATIVE, false},
+	{NULL, 0, false}
+};
 
 static void
 assign_max_cached_chunks_per_hypertable_hook(int newval, void *extra)
@@ -99,10 +99,10 @@ _guc_init(void)
 							assign_max_cached_chunks_per_hypertable_hook,
 							NULL);
 
-DefineCustomEnumVariable("timescaledb.cluster_method", "Enable cluster with reduced locking.",
+	DefineCustomEnumVariable("timescaledb.cluster_method", "Enable cluster with reduced locking.",
 							 "Enable cluster which only acquires an AccessExclusive lock during the final swap.",
 							 &guc_timescale_cluster,
-							 GUC_TIMESCALE_CLUSTER_READ_OPT, 
+							 GUC_TIMESCALE_CLUSTER_READ_OPT,
 							 guc_timescale_cluster_options,
 							 PGC_USERSET,
 							 0,

@@ -1106,14 +1106,14 @@ process_cluster_start(Node *parsetree, ProcessUtilityContext context)
 	Assert(IsA(stmt, ClusterStmt));
 
 	/* If this is a re-cluster on all tables, there is nothing we need to do */
-	//TODO should we take charge and run our cluster on our tables?
+	/* TODO should we take charge and run our cluster on our tables? */
 	if (NULL == stmt->relation)
 		return false;
 
 	hcache = hypertable_cache_pin();
 	ht = hypertable_cache_get_entry_rv(hcache, stmt->relation);
 
-	if(NULL == ht)
+	if (NULL == ht)
 	{
 		cache_release(hcache);
 		return false;
@@ -1190,7 +1190,7 @@ process_cluster_start(Node *parsetree, ProcessUtilityContext context)
 			chunk_index_mark_clustered(cim->chunkoid, cim->indexoid);
 
 			/* Do the job. */
-			if(GUC_TIMESCALE_CLUSTER_READ_OPT == guc_timescale_cluster)
+			if (GUC_TIMESCALE_CLUSTER_READ_OPT == guc_timescale_cluster)
 				timescale_recluster_rel(cim->chunkoid, cim->indexoid, true, stmt->verbose);
 			else
 				cluster_rel(cim->chunkoid, cim->indexoid, true, stmt->verbose);
