@@ -1190,7 +1190,7 @@ process_cluster_start(Node *parsetree, ProcessUtilityContext context)
 			chunk_index_mark_clustered(cim->chunkoid, cim->indexoid);
 
 			/* Do the job. */
-			if(guc_non_locking_cluster)
+			if(GUC_TIMESCALE_CLUSTER_READ_OPT == guc_timescale_cluster)
 				timescale_recluster_rel(cim->chunkoid, cim->indexoid, true, stmt->verbose);
 			else
 				cluster_rel(cim->chunkoid, cim->indexoid, true, stmt->verbose);

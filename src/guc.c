@@ -9,9 +9,15 @@ bool		guc_disable_optimizations = false;
 bool		guc_optimize_non_hypertables = false;
 bool		guc_restoring = false;
 bool		guc_constraint_aware_append = true;
-bool		guc_non_locking_cluster = true;
 int			guc_max_open_chunks_per_insert = 10;
 int			guc_max_cached_chunks_per_hypertable = 10;
+int			guc_timescale_cluster = 1;
+
+ static const struct config_enum_entry guc_timescale_cluster_options[] = {
+     {"read_optimized", GUC_TIMESCALE_CLUSTER_READ_OPT, false},
+     {"native", GUC_TIMESCALE_CLUSTER_NATIVE, false},
+     {NULL, 0, false}
+ };
 
 static void
 assign_max_cached_chunks_per_hypertable_hook(int newval, void *extra)
@@ -64,16 +70,6 @@ _guc_init(void)
 							 NULL,
 							 NULL);
 
-	DefineCustomBoolVariable("timescaledb.non_locking_cluster", "Enable cluster with reduced locking.",
-							 "Enable cluster which only acquires an AccessExclusive lock during the final swap.",
-							 &guc_non_locking_cluster,
-							 true,
-							 PGC_USERSET,
-							 0,
-							 NULL,
-							 NULL,
-							 NULL);
-
 	DefineCustomIntVariable("timescaledb.max_open_chunks_per_insert",
 							"Maximum open chunks per insert",
 							"Maximum number of open chunk tables per insert",
@@ -102,6 +98,17 @@ _guc_init(void)
 							NULL,
 							assign_max_cached_chunks_per_hypertable_hook,
 							NULL);
+
+DefineCustomEnumVariable("timescaledb.cluster_method", "Enable cluster with reduced locking.",
+							 "Enable cluster which only acquires an AccessExclusive lock during the final swap.",
+							 &guc_timescale_cluster,
+							 GUC_TIMESCALE_CLUSTER_READ_OPT, 
+							 guc_timescale_cluster_options,
+							 PGC_USERSET,
+							 0,
+							 NULL,
+							 NULL,
+							 NULL);
 }
 
 void

@@ -41,14 +41,17 @@ SELECT indexrelid::regclass, indisclustered
 FROM pg_index
 WHERE indisclustered = true;
 
+-- we should start read_optimized
+SELECT setting FROM pg_settings WHERE name = 'timescaledb.cluster_method';
+
 -- Set guc to run basic cluster
-UPDATE pg_settings SET setting = false WHERE name = 'timescaledb.non_locking_cluster';
+UPDATE pg_settings SET setting = 'native' WHERE name = 'timescaledb.cluster_method';
 
 -- and old cluster should be run
 CLUSTER VERBOSE cluster_test using cluster_test_time_location_idx;
 
 -- Set guc back
-UPDATE pg_settings SET setting = reset_val WHERE name = 'timescaledb.non_locking_cluster';
+UPDATE pg_settings SET setting = 'read_optimized' WHERE name = 'timescaledb.cluster_method';
 
 -- and new cluster should be run
 CLUSTER VERBOSE cluster_test using cluster_test_time_location_idx;
