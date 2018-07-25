@@ -139,8 +139,8 @@ timescale_recluster_rel(Oid tableOid, Oid indexOid, bool recheck, bool verbose)
 		{
 			relation_close(OldHeap, ExclusiveLock);
 			ereport(WARNING,
-				(errcode(ERRCODE_WARNING),
-				 errmsg("Ownership change during CLUSTER.")));
+					(errcode(ERRCODE_WARNING),
+					 errmsg("Ownership change during CLUSTER.")));
 			return;
 		}
 
@@ -155,8 +155,8 @@ timescale_recluster_rel(Oid tableOid, Oid indexOid, bool recheck, bool verbose)
 		 */
 		if (OldHeap->rd_rel->relpersistence == RELPERSISTENCE_TEMP)
 			ereport(ERROR,
-				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-				 errmsg("cannot recluster a temporary table.")));
+					(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+					 errmsg("cannot recluster a temporary table.")));
 
 		if (OidIsValid(indexOid))
 		{
@@ -548,9 +548,9 @@ copy_heap_data(Oid OIDNewHeap, Oid OIDOldHeap, Oid OIDOldIndex, bool verbose,
 			case HEAPTUPLE_INSERT_IN_PROGRESS:
 
 				/*
-				 * Since we hold exclusive lock on the relation, the
-				 * only way to see this is if it was inserted earlier in our
-				 * own transaction.
+				 * Since we hold exclusive lock on the relation, the only way
+				 * to see this is if it was inserted earlier in our own
+				 * transaction.
 				 */
 				if (!TransactionIdIsCurrentTransactionId(HeapTupleHeaderGetXmin(tuple->t_data)))
 					elog(ERROR, "concurrent insert in progress within table \"%s\"",

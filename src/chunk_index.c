@@ -926,7 +926,7 @@ chunk_index_mark_clustered(Oid chunkrelid, Oid indexrelid)
 }
 
 static Oid
-chunk_index_duplicate_index(Relation hypertable_rel, Chunk *src_chunk, Oid chunk_index_oid,  Relation dest_chunk_rel)
+chunk_index_duplicate_index(Relation hypertable_rel, Chunk *src_chunk, Oid chunk_index_oid, Relation dest_chunk_rel)
 {
 	Relation	chunk_index_rel = relation_open(chunk_index_oid, AccessShareLock);
 	ChunkIndexMapping *cim = chunk_index_get_by_indexrelid(src_chunk, chunk_index_oid);
@@ -934,7 +934,8 @@ chunk_index_duplicate_index(Relation hypertable_rel, Chunk *src_chunk, Oid chunk
 	Oid			constraint_oid = get_index_constraint(cim->parent_indexoid);
 
 	Oid			new_chunk_indexrelid = chunk_relation_index_create(hypertable_rel, chunk_index_rel,
-														dest_chunk_rel, OidIsValid(constraint_oid));
+																   dest_chunk_rel, OidIsValid(constraint_oid));
+
 	relation_close(chunk_index_rel, AccessShareLock);
 	return new_chunk_indexrelid;
 }
@@ -967,8 +968,8 @@ chunk_index_duplicate(Oid src_chunkrelid, Oid dest_chunkrelid, List **src_index_
 	foreach(index_elem, index_oids)
 	{
 		Oid			chunk_index_oid = lfirst_oid(index_elem);
-		Oid			new_chunk_indexrelid = chunk_index_duplicate_index(hypertable_rel, src_chunk, chunk_index_oid,  dest_chunk_rel);
-		
+		Oid			new_chunk_indexrelid = chunk_index_duplicate_index(hypertable_rel, src_chunk, chunk_index_oid, dest_chunk_rel);
+
 		new_index_oids = lappend_oid(new_index_oids, new_chunk_indexrelid);
 	}
 
@@ -977,7 +978,7 @@ chunk_index_duplicate(Oid src_chunkrelid, Oid dest_chunkrelid, List **src_index_
 	heap_close(dest_chunk_rel, NoLock);
 	heap_close(src_chunk_rel, NoLock);
 
-	if(src_index_oids != NULL)
+	if (src_index_oids != NULL)
 		*src_index_oids = index_oids;
 
 	return new_index_oids;
