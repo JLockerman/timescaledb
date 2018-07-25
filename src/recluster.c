@@ -58,6 +58,8 @@
 #include "chunk_index.h"
 #include "recluster.h"
 
+#define RECLUSTER_ACCESS_EXCLUSIVE_DEADLOCK_TIMEOUT "101000"
+
 static void timescale_rebuild_relation(Relation OldHeap, Oid indexOid, bool verbose);
 static void copy_heap_data(Oid OIDNewHeap, Oid OIDOldHeap, Oid OIDOldIndex,
 			   bool verbose, bool *pSwapToastByContent,
@@ -69,6 +71,7 @@ static void reform_and_rewrite_tuple(HeapTuple tuple,
 						 bool newRelHasOids, RewriteState rwstate);
 
 static void finish_heap_swaps(Oid OIDOldHeap, Oid OIDNewHeap,
+				  List *old_index_oids,
 				  List *new_index_oids,
 				  bool swap_toast_by_content,
 				  bool is_internal,
@@ -135,6 +138,9 @@ timescale_recluster_rel(Oid tableOid, Oid indexOid, bool recheck, bool verbose)
 		if (!pg_class_ownercheck(tableOid, GetUserId()))
 		{
 			relation_close(OldHeap, ExclusiveLock);
+			ereport(WARNING,
+				(errcode(ERRCODE_WARNING),
+				 errmsg("Ownership change during CLUSTER.")));
 			return;
 		}
 
@@ -147,11 +153,10 @@ timescale_recluster_rel(Oid tableOid, Oid indexOid, bool recheck, bool verbose)
 		 * timescale_cluster_rel which is redundant, but we leave it for extra
 		 * safety.
 		 */
-		if (RELATION_IS_OTHER_TEMP(OldHeap))
-		{
-			relation_close(OldHeap, ExclusiveLock);
-			return;
-		}
+		if (OldHeap->rd_rel->relpersistence == RELPERSISTENCE_TEMP)
+			ereport(ERROR,
+				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+				 errmsg("cannot recluster a temporary table.")));
 
 		if (OidIsValid(indexOid))
 		{
@@ -184,32 +189,11 @@ timescale_recluster_rel(Oid tableOid, Oid indexOid, bool recheck, bool verbose)
 		}
 	}
 
-	/*
-	 * We allow VACUUM FULL, but not CLUSTER, on shared catalogs.  CLUSTER
-	 * would work in most respects, but the index would only get marked as
-	 * indisclustered in the current database, leading to unexpected behavior
-	 * if CLUSTER were later invoked in another database.
-	 */
+	/* We do not allow reclustering on shared catalogs. */
 	if (OldHeap->rd_rel->relisshared)
 		ereport(ERROR,
 				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
 				 errmsg("cannot recluster a shared catalog")));
-
-	/*
-	 * Don't process temp tables of other backends ... their local buffer
-	 * manager is not going to cope.
-	 */
-	if (RELATION_IS_OTHER_TEMP(OldHeap))
-	{
-		if (OidIsValid(indexOid))
-			ereport(ERROR,
-					(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-					 errmsg("cannot recluster temporary tables of other sessions")));
-		else
-			ereport(ERROR,
-					(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-					 errmsg("cannot vacuum temporary tables of other sessions")));
-	}
 
 	/*
 	 * Also check for active uses of the relation in the current transaction,
@@ -228,12 +212,10 @@ timescale_recluster_rel(Oid tableOid, Oid indexOid, bool recheck, bool verbose)
 	 * multi-relation request -- for example, CLUSTER was run on the entire
 	 * database.
 	 */
-	if (OldHeap->rd_rel->relkind == RELKIND_MATVIEW &&
-		!RelationIsPopulated(OldHeap))
-	{
-		relation_close(OldHeap, ExclusiveLock);
-		return;
-	}
+	if (OldHeap->rd_rel->relkind == RELKIND_MATVIEW)
+		ereport(ERROR,
+				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+				 errmsg("cannot recluster a materialized view.")));
 
 	/*
 	 * All predicate locks on the tuples or pages are about to be made
@@ -263,6 +245,7 @@ timescale_rebuild_relation(Relation OldHeap, Oid indexOid, bool verbose)
 	Oid			tableOid = RelationGetRelid(OldHeap);
 	Oid			tableSpace = OldHeap->rd_rel->reltablespace;
 	Oid			OIDNewHeap;
+	List	   *old_index_oids;
 	List	   *new_index_oids;
 	char		relpersistence;
 	bool		swap_toast_by_content;
@@ -290,13 +273,13 @@ timescale_rebuild_relation(Relation OldHeap, Oid indexOid, bool verbose)
 				   &swap_toast_by_content, &frozenXid, &cutoffMulti);
 
 	/* Create versions of the tables indexes for the new table */
-	new_index_oids = chunk_index_duplicate(tableOid, OIDNewHeap);
+	new_index_oids = chunk_index_duplicate(tableOid, OIDNewHeap, &old_index_oids);
 
 	/*
 	 * Swap the physical files of the target and transient tables, then
 	 * rebuild the target's indexes and throw away the transient table.
 	 */
-	finish_heap_swaps(tableOid, OIDNewHeap, new_index_oids,
+	finish_heap_swaps(tableOid, OIDNewHeap, old_index_oids, new_index_oids,
 					  swap_toast_by_content, true,
 					  frozenXid, cutoffMulti);
 }
@@ -507,8 +490,8 @@ copy_heap_data(Oid OIDNewHeap, Oid OIDOldHeap, Oid OIDOldIndex, bool verbose,
 						get_namespace_name(RelationGetNamespace(OldHeap)),
 						RelationGetRelationName(OldHeap))));
 	else
-		ereport(elevel,
-				(errmsg("vacuuming \"%s.%s\"",
+		ereport(ERROR,
+				(errmsg("Tried to use a recluster as a vaccum for \"%s.%s\"",
 						get_namespace_name(RelationGetNamespace(OldHeap)),
 						RelationGetRelationName(OldHeap))));
 
@@ -565,15 +548,12 @@ copy_heap_data(Oid OIDNewHeap, Oid OIDOldHeap, Oid OIDOldIndex, bool verbose,
 			case HEAPTUPLE_INSERT_IN_PROGRESS:
 
 				/*
-				 * Since we hold exclusive lock on the relation, normally the
+				 * Since we hold exclusive lock on the relation, the
 				 * only way to see this is if it was inserted earlier in our
-				 * own transaction.  However, it can happen in system
-				 * catalogs, since we tend to release write lock before commit
-				 * there.  Give a warning if neither case applies; but in any
-				 * case we had better copy it.
+				 * own transaction.
 				 */
 				if (!TransactionIdIsCurrentTransactionId(HeapTupleHeaderGetXmin(tuple->t_data)))
-					elog(WARNING, "concurrent insert in progress within table \"%s\"",
+					elog(ERROR, "concurrent insert in progress within table \"%s\"",
 						 RelationGetRelationName(OldHeap));
 				/* treat as live */
 				isdead = false;
@@ -584,7 +564,7 @@ copy_heap_data(Oid OIDNewHeap, Oid OIDOldHeap, Oid OIDOldIndex, bool verbose,
 				 * Similar situation to INSERT_IN_PROGRESS case.
 				 */
 				if (!TransactionIdIsCurrentTransactionId(HeapTupleHeaderGetUpdateXid(tuple->t_data)))
-					elog(WARNING, "concurrent delete in progress within table \"%s\"",
+					elog(ERROR, "concurrent delete in progress within table \"%s\"",
 						 RelationGetRelationName(OldHeap));
 				/* treat as recently dead */
 				tups_recently_dead += 1;
@@ -717,6 +697,7 @@ copy_heap_data(Oid OIDNewHeap, Oid OIDOldHeap, Oid OIDOldIndex, bool verbose,
  */
 static void
 finish_heap_swaps(Oid OIDOldHeap, Oid OIDNewHeap,
+				  List *old_index_oids,
 				  List *new_index_oids,
 				  bool swap_toast_by_content,
 				  bool is_internal,
@@ -725,7 +706,6 @@ finish_heap_swaps(Oid OIDOldHeap, Oid OIDNewHeap,
 {
 	ObjectAddress object;
 	Relation	oldHeapRel;
-	List	   *old_index_oids;
 	ListCell   *old_index_cell;
 	ListCell   *new_index_cell;
 
@@ -745,7 +725,7 @@ finish_heap_swaps(Oid OIDOldHeap, Oid OIDNewHeap,
 	 */
 	/* TODO is this the right timeout value? */
 	int			config_change = set_config_option("deadlock_timeout",
-												  "101000",
+												  RECLUSTER_ACCESS_EXCLUSIVE_DEADLOCK_TIMEOUT,
 												  PGC_SUSET,
 												  PGC_S_SESSION,
 												  GUC_ACTION_LOCAL,
@@ -771,7 +751,6 @@ finish_heap_swaps(Oid OIDOldHeap, Oid OIDNewHeap,
 						frozenXid, cutoffMulti);
 
 	/* Swap the contents of the indexes */
-	old_index_oids = RelationGetIndexList(oldHeapRel);
 	forboth(old_index_cell, old_index_oids, new_index_cell, new_index_oids)
 	{
 		Oid			old_index_oid = lfirst_oid(old_index_cell);

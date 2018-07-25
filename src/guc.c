@@ -99,8 +99,8 @@ _guc_init(void)
 							assign_max_cached_chunks_per_hypertable_hook,
 							NULL);
 
-	DefineCustomEnumVariable("timescaledb.cluster_method", "Enable cluster with reduced locking.",
-							 "Enable cluster which only acquires an AccessExclusive lock during the final swap.",
+	DefineCustomEnumVariable("timescaledb.cluster_method", "Choose which CLUSTER strategy to use.",
+							 "Choose between the builtin postgres CLUSTER and one which only acquires an AccessExclusive lock during the final swap.",
 							 &guc_timescale_cluster,
 							 GUC_TIMESCALE_CLUSTER_READ_OPT,
 							 guc_timescale_cluster_options,

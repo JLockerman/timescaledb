@@ -18,6 +18,10 @@ if [[ -z ${TESTS} ]]; then
         PG_REGRESS_OPTS="${PG_REGRESS_OPTS} --schedule=${TEST_SCHEDULE}"
     fi
 else
+    # Both this and pg_isolation_regress.sh use the same TESTS env var to decide which tests to run.
+    # Since we only want to pass the test runner the kind of tests it can understand,
+    # and only those which actually exist, we use TESTS as a filter for the test folder,
+    # passing in only those tests from the directory which are found in TESTS
     FILTER=${TESTS}
     TESTS=
     for t in ${EXE_DIR}/sql/*.sql; do

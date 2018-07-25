@@ -31,7 +31,7 @@ extern List *chunk_index_get_mappings(Hypertable *ht, Oid hypertable_indexrelid)
 extern ChunkIndexMapping *chunk_index_get_by_hypertable_indexrelid(Chunk *chunk, Oid hypertable_indexrelid);
 extern void chunk_index_mark_clustered(Oid chunkrelid, Oid indexrelid);
 
-extern List *chunk_index_duplicate(Oid src_chunkrelid, Oid dest_chunkrelid);
+extern List *chunk_index_duplicate(Oid src_chunkrelid, Oid dest_chunkrelid, List **src_index_oids);
 
 /* chunk_index_recreate  is a process akin to reindex
  * except that indexes are created in 2 steps
