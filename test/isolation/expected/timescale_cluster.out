@@ -1,5 +1,28 @@
 Parsed test spec with 2 sessions
 
+starting permutation: s1a s1b s1c s2
+step s1a: SELECT * FROM ts_cluster_test;
+time           temp           location       
+
+Fri Jan 20 09:00:01 2017 PST23.4           1              
+Sat Jan 21 09:00:01 2017 PST21.3           2              
+Sun Jan 22 09:00:01 2017 PST19.5           3              
+step s1b: INSERT INTO ts_cluster_test VALUES ('2017-01-22T09:00:01', 19.5, 3);
+step s1c: COMMIT;
+step s2: CLUSTER ts_cluster_test USING ts_cluster_test_time_idx;
+
+starting permutation: s1a s1b s2 s1c
+step s1a: SELECT * FROM ts_cluster_test;
+time           temp           location       
+
+Fri Jan 20 09:00:01 2017 PST23.4           1              
+Sat Jan 21 09:00:01 2017 PST21.3           2              
+Sun Jan 22 09:00:01 2017 PST19.5           3              
+step s1b: INSERT INTO ts_cluster_test VALUES ('2017-01-22T09:00:01', 19.5, 3);
+step s2: CLUSTER ts_cluster_test USING ts_cluster_test_time_idx; <waiting ...>
+step s1c: COMMIT;
+step s2: <... completed>
+
 starting permutation: s1a s2 s1b s1c
 step s1a: SELECT * FROM ts_cluster_test;
 time           temp           location       
@@ -11,4 +34,15 @@ step s2: CLUSTER ts_cluster_test USING ts_cluster_test_time_idx; <waiting ...>
 step s1b: INSERT INTO ts_cluster_test VALUES ('2017-01-22T09:00:01', 19.5, 3);
 step s2: <... completed>
 error in steps s1b s2: ERROR:  deadlock detected
+step s1c: COMMIT;
+
+starting permutation: s2 s1a s1b s1c
+step s2: CLUSTER ts_cluster_test USING ts_cluster_test_time_idx;
+step s1a: SELECT * FROM ts_cluster_test;
+time           temp           location       
+
+Fri Jan 20 09:00:01 2017 PST23.4           1              
+Sat Jan 21 09:00:01 2017 PST21.3           2              
+Sun Jan 22 09:00:01 2017 PST19.5           3              
+step s1b: INSERT INTO ts_cluster_test VALUES ('2017-01-22T09:00:01', 19.5, 3);
 step s1c: COMMIT;

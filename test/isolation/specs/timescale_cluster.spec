@@ -17,5 +17,3 @@ step "s1c"	{ COMMIT; }
 
 session "s2"
 step "s2"	{ CLUSTER ts_cluster_test USING ts_cluster_test_time_idx; }
-
-permutation "s1a" "s2" "s1b" "s1c"
