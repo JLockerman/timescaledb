@@ -79,6 +79,9 @@ file(WRITE ${TEST_OUTPUT_DIR}/postgresql.conf "shared_preload_libraries=timescal
 
 # installcheck starts up new temporary instances for testing code
 add_custom_target(installcheck
+  DEPENDS regresscheck isocheck)
+
+add_custom_target(regresscheck
   COMMAND ${CMAKE_COMMAND} -E env
   ${PG_REGRESS_ENV}
   ${CMAKE_CURRENT_SOURCE_DIR}/pg_regress.sh
@@ -88,7 +91,6 @@ add_custom_target(installcheck
   ${PG_REGRESS_OPTS_TEMP_INSTANCE}
   USES_TERMINAL)
 
- # installcheck starts up new temporary instances for testing code
 add_custom_target(isocheck
   COMMAND ${CMAKE_COMMAND} -E env
   ${PG_ISOLATION_REGRESS_ENV}
@@ -102,12 +104,26 @@ add_custom_target(isocheck
 
 # installchecklocal tests against an existing postgres instance
 add_custom_target(installchecklocal
+  DEPENDS regresschecklocal isochecklocal)
+
+add_custom_target(regresschecklocal
   COMMAND ${CMAKE_COMMAND} -E env
   ${PG_REGRESS_ENV}
   ${CMAKE_CURRENT_SOURCE_DIR}/pg_regress.sh
   ${PG_REGRESS_OPTS_BASE}
   ${PG_REGRESS_OPTS_EXTRA}
   ${PG_REGRESS_OPTS_INOUT}
+  ${PG_REGRESS_OPTS_LOCAL_INSTANCE}
+  USES_TERMINAL)
+
+add_custom_target(isochecklocal
+  COMMAND ${CMAKE_COMMAND} -E env
+  ${PG_ISOLATION_REGRESS_ENV}
+  ${CMAKE_CURRENT_SOURCE_DIR}/pg_isolation_regress.sh
+  ${PG_REGRESS_OPTS_BASE}
+  ${PG_REGRESS_OPTS_EXTRA}
+  ${PG_REGRESS_OPTS_INOUT}
+  --load-extension=timescaledb
   ${PG_REGRESS_OPTS_LOCAL_INSTANCE}
   USES_TERMINAL)
 

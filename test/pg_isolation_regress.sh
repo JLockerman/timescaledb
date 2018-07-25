@@ -17,6 +17,16 @@ if [[ -z ${TESTS} ]]; then
     else
         PG_ISOLATION_REGRESS_OPTS="${PG_ISOLATION_REGRESS_OPTS} --schedule=${ISOLATION_TEST_SCHEDULE}"
     fi
+else
+    FILTER=${TESTS}
+    TESTS=
+    for t in ${EXE_DIR}/specs/*.spec; do
+        t=${t##${EXE_DIR}/specs/}
+        t=${t%.spec}
+        if [[ $FILTER = *"$t"* ]]; then
+            TESTS="${TESTS} $t"
+        fi
+    done
 fi
 
 echo cmd ${PG_ISOLATION_REGRESS} ${TESTS}

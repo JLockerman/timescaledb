@@ -17,6 +17,16 @@ if [[ -z ${TESTS} ]]; then
     else
         PG_REGRESS_OPTS="${PG_REGRESS_OPTS} --schedule=${TEST_SCHEDULE}"
     fi
+else
+    FILTER=${TESTS}
+    TESTS=
+    for t in ${EXE_DIR}/sql/*.sql; do
+        t=${t##${EXE_DIR}/sql/}
+        t=${t%.sql}
+        if [[ $FILTER = *"$t"* ]]; then
+            TESTS="${TESTS} $t"
+        fi
+    done
 fi
 
 ${PG_REGRESS} $@ ${PG_REGRESS_OPTS} ${TESTS}
