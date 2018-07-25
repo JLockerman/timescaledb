@@ -744,7 +744,7 @@ finish_heap_swaps(Oid OIDOldHeap, Oid OIDNewHeap,
 	 */
 	//TODO is this the right timeout value?
 	int config_change = set_config_option("deadlock_timeout",
-                              "3600000",
+                              "101000",
                               PGC_SUSET,
                               PGC_S_SESSION,
                               GUC_ACTION_LOCAL,
