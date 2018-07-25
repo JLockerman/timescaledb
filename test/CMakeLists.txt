@@ -6,6 +6,14 @@ find_program(PG_REGRESS pg_regress
 
 message(STATUS "Using pg_regress ${PG_REGRESS}")
 
+find_program(PG_ISOLATION_REGRESS pg_isolation_regress
+  HINTS
+  "${PG_PKGLIBDIR}/pgxs/src/test/isolation/"
+  REQUIRED)
+
+
+message(STATUS "Using pg_isolation_regress ${PG_ISOLATION_REGRESS}")
+
 set(TEST_ROLE_SUPERUSER super_user)
 set(TEST_ROLE_DEFAULT_PERM_USER default_perm_user)
 set(TEST_ROLE_DEFAULT_PERM_USER_2 default_perm_user_2)
@@ -56,6 +64,17 @@ set(PG_REGRESS_ENV
   TEST_SCHEDULE=${TEST_SCHEDULE}
   PG_REGRESS=${PG_REGRESS})
 
+set(PG_ISOLATION_REGRESS_ENV
+  TEST_PGUSER=${TEST_PGUSER}
+  TEST_ROLE_SUPERUSER=${TEST_ROLE_SUPERUSER}
+  TEST_ROLE_DEFAULT_PERM_USER=${TEST_ROLE_DEFAULT_PERM_USER}
+  TEST_ROLE_DEFAULT_PERM_USER_2=${TEST_ROLE_DEFAULT_PERM_USER_2}
+  TEST_DBNAME=${TEST_DBNAME}
+  TEST_INPUT_DIR=${TEST_INPUT_DIR}
+  TEST_OUTPUT_DIR=${TEST_OUTPUT_DIR}
+  ISOLATION_TEST_SCHEDULE=${ISOLATION_TEST_SCHEDULE}
+  PG_ISOLATION_REGRESS=${PG_ISOLATION_REGRESS})
+
 file(WRITE ${TEST_OUTPUT_DIR}/postgresql.conf "shared_preload_libraries=timescaledb")
 
 # installcheck starts up new temporary instances for testing code
@@ -66,6 +85,18 @@ add_custom_target(installcheck
   ${PG_REGRESS_OPTS_BASE}
   ${PG_REGRESS_OPTS_EXTRA}
   ${PG_REGRESS_OPTS_INOUT}
+  ${PG_REGRESS_OPTS_TEMP_INSTANCE}
+  USES_TERMINAL)
+
+ # installcheck starts up new temporary instances for testing code
+add_custom_target(isocheck
+  COMMAND ${CMAKE_COMMAND} -E env
+  ${PG_ISOLATION_REGRESS_ENV}
+  ${CMAKE_CURRENT_SOURCE_DIR}/pg_isolation_regress.sh
+  ${PG_REGRESS_OPTS_BASE}
+  ${PG_REGRESS_OPTS_EXTRA}
+  ${PG_REGRESS_OPTS_INOUT}
+  --load-extension=timescaledb
   ${PG_REGRESS_OPTS_TEMP_INSTANCE}
   USES_TERMINAL)
 

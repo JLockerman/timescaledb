@@ -44,9 +44,9 @@ mkdir -p dump
 ${PSQL} $@ -U $USER -d postgres -v ECHO=none -c "ALTER USER $TEST_ROLE_SUPERUSER WITH SUPERUSER;"
 ${PSQL} $@ -U $TEST_ROLE_SUPERUSER -d postgres -v ECHO=none -c "DROP DATABASE $TEST_DBNAME;" >/dev/null 2>&1 || :
 ${PSQL} $@ -U $TEST_ROLE_SUPERUSER -d postgres -v ECHO=none -c "DROP DATABASE $TEST_DBNAME2;" >/dev/null 2>&1 || :
-${PSQL} $@ -U $TEST_ROLE_SUPERUSER -d postgres -v ECHO=none -c "CREATE DATABASE $TEST_DBNAME;"
-${PSQL} $@ -U $TEST_ROLE_SUPERUSER -d postgres -v ECHO=none -c "CREATE DATABASE $TEST_DBNAME2;"
-${PSQL} $@ -U $TEST_ROLE_SUPERUSER -d single -v ECHO=none -c "CREATE EXTENSION timescaledb;"
+${PSQL} $@ -U $TEST_ROLE_SUPERUSER -d postgres -v ECHO=none -c "CREATE DATABASE $TEST_DBNAME;" >/dev/null 2>&1
+${PSQL} $@ -U $TEST_ROLE_SUPERUSER -d postgres -v ECHO=none -c "CREATE DATABASE $TEST_DBNAME2;" >/dev/null 2>&1
+${PSQL} $@ -U $TEST_ROLE_SUPERUSER -d single -v ECHO=none -c "CREATE EXTENSION timescaledb;" >/dev/null 2>&1
 ${PSQL} $@ -U $TEST_ROLE_SUPERUSER -d single -v ECHO=none < ${EXE_DIR}/sql/utils/testsupport.sql >/dev/null 2>&1 || :
 
 ${PSQL} -U ${TEST_PGUSER} \
