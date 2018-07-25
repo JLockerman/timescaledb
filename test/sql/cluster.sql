@@ -34,7 +34,7 @@ CLUSTER VERBOSE;
 -- Change the clustered index
 CREATE INDEX ON cluster_test (time, location);
 
-CLUSTER VERBOSE cluster_test using cluster_test_time_location_idx;
+CLUSTER VERBOSE cluster_test USING cluster_test_time_location_idx;
 
 -- Show updated clustered indexes
 SELECT indexrelid::regclass, indisclustered
@@ -51,7 +51,7 @@ SELECT setting FROM pg_settings WHERE name = 'timescaledb.cluster_method';
 UPDATE pg_settings SET setting = 'native' WHERE name = 'timescaledb.cluster_method';
 
 -- and old cluster should be run
-CLUSTER VERBOSE cluster_test using cluster_test_time_location_idx;
+CLUSTER VERBOSE cluster_test USING cluster_test_time_location_idx;
 
 -- Set guc back
 UPDATE pg_settings SET setting = 'read_optimized' WHERE name = 'timescaledb.cluster_method';
