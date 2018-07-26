@@ -27,7 +27,15 @@ else
     for t in ${EXE_DIR}/sql/*.sql; do
         t=${t##${EXE_DIR}/sql/}
         t=${t%.sql}
-        if [[ $FILTER = *"$t"* ]]; then
+        # we use the following chain of comparisons to properly handle the case
+        # where a test name is a substring of another
+        if [[ $FILTER = "$t" ]]; then # one test
+            TESTS="${TESTS} $t"
+        elif [[ $FILTER = "$t "* ]]; then # first test in the list
+            TESTS="${TESTS} $t"
+        elif [[ $FILTER = *" $t" ]]; then # last test in the list
+            TESTS="${TESTS} $t"
+        elif [[ $FILTER = *" $t "* ]]; then # test in middle of the list
             TESTS="${TESTS} $t"
         fi
     done

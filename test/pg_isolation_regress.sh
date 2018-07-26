@@ -27,7 +27,15 @@ else
     for t in ${EXE_DIR}/isolation/specs/*.spec; do
         t=${t##${EXE_DIR}/isolation/specs/}
         t=${t%.spec}
-        if [[ $FILTER = *"$t"* ]]; then
+        # we use the following chain of comparisons to properly handle the case
+        # where a test name is a substring of another
+        if [[ $FILTER = "$t" ]]; then # one test
+            TESTS="${TESTS} $t"
+        elif [[ $FILTER = "$t "* ]]; then # first test in the list
+            TESTS="${TESTS} $t"
+        elif [[ $FILTER = *" $t" ]]; then # last test in the list
+            TESTS="${TESTS} $t"
+        elif [[ $FILTER = *" $t "* ]]; then # test in middle of the list
             TESTS="${TESTS} $t"
         fi
     done
