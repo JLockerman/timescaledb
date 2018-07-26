@@ -88,7 +88,7 @@ WHERE indisclustered = true;
 
 -- CLUSTER a chunk directly
 CLUSTER VERBOSE _timescaledb_internal._hyper_1_2_chunk;
-INFO:  clustering "_timescaledb_internal._hyper_1_2_chunk" using sequential scan and sort
+INFO:  reclustering "_timescaledb_internal._hyper_1_2_chunk" using sequential scan and sort
 INFO:  "_hyper_1_2_chunk": found 0 removable, 1 nonremovable row versions in 1 pages
 -- we should start read_optimized
 SELECT setting FROM pg_settings WHERE name = 'timescaledb.cluster_method';
