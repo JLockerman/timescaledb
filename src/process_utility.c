@@ -1241,16 +1241,25 @@ recluster_chunk(ClusterStmt *stmt, Cache *hcache, bool is_top_level)
 	}
 	else
 	{
-		/* we couldn't find the index on the hypertable, maybe it's a chunk index */
-		/* on NULL we get the index from the hypertable, if we cannot something is wrong */
-		if(NULL == stmt->indexname)
+		/*
+		 * we couldn't find the index on the hypertable, maybe it's a chunk
+		 * index
+		 */
+		/*
+		 * on NULL we get the index from the hypertable, if we cannot
+		 * something is wrong
+		 */
+		if (NULL == stmt->indexname)
 			return false;
 
-		/* If we didn't find an index on the hypertable check if it exists on the chunk*/
+		/*
+		 * If we didn't find an index on the hypertable check if it exists on
+		 * the chunk
+		 */
 		index_relid = get_relname_relid(stmt->indexname, get_rel_namespace(chunk_id));
 
 		/* Let regular process utility handle invalid indexes */
-		if(!OidIsValid(index_relid))
+		if (!OidIsValid(index_relid))
 			return false;
 
 		cim = chunk_index_get_by_indexrelid(chunk, index_relid);

@@ -123,8 +123,8 @@ timescale_recluster_rel(Oid tableOid, Oid indexOid, bool verbose)
 	if (!OldHeap)
 	{
 		ereport(WARNING,
-			(errcode(ERRCODE_WARNING),
-				errmsg("Table disappeared during CLUSTER.")));
+				(errcode(ERRCODE_WARNING),
+				 errmsg("Table disappeared during CLUSTER.")));
 		return;
 	}
 
@@ -139,19 +139,19 @@ timescale_recluster_rel(Oid tableOid, Oid indexOid, bool verbose)
 		relation_close(OldHeap, ExclusiveLock);
 		ereport(WARNING,
 				(errcode(ERRCODE_WARNING),
-					errmsg("Ownership change during CLUSTER.")));
+				 errmsg("Ownership change during CLUSTER.")));
 		return;
 	}
 
 	if (IsSystemRelation(OldHeap))
 		ereport(ERROR,
-			(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-				errmsg("Cannot recluster a system relation.")));
+				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+				 errmsg("Cannot recluster a system relation.")));
 
 	if (OldHeap->rd_rel->relpersistence != RELPERSISTENCE_PERMANENT)
 		ereport(ERROR,
 				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-					errmsg("can only recluster a permanent table.")));
+				 errmsg("can only recluster a permanent table.")));
 
 	/* We do not allow reclustering on shared catalogs. */
 	if (OldHeap->rd_rel->relisshared)
@@ -165,35 +165,39 @@ timescale_recluster_rel(Oid tableOid, Oid indexOid, bool verbose)
 				 errmsg("can only recluster a relation.")));
 
 	/*
-	* Check that the index still exists
-	*/
+	 * Check that the index still exists
+	 */
 	if (!SearchSysCacheExists1(RELOID, ObjectIdGetDatum(indexOid)))
 	{
 		ereport(WARNING,
-			(errcode(ERRCODE_WARNING),
-				errmsg("Index disappeared during CLUSTER.")));
+				(errcode(ERRCODE_WARNING),
+				 errmsg("Index disappeared during CLUSTER.")));
 		relation_close(OldHeap, ExclusiveLock);
 		return;
 	}
 
 	/*
-	* Check that the index is still the one with indisclustered set.
-	*/
+	 * Check that the index is still the one with indisclustered set.
+	 */
 	tuple = SearchSysCache1(INDEXRELID, ObjectIdGetDatum(indexOid));
 	if (!HeapTupleIsValid(tuple))	/* probably can't happen */
 	{
 		ereport(WARNING,
-			(errcode(ERRCODE_WARNING),
-				errmsg("Invalid index heap during CLUSTER.")));
+				(errcode(ERRCODE_WARNING),
+				 errmsg("Invalid index heap during CLUSTER.")));
 		relation_close(OldHeap, ExclusiveLock);
 		return;
 	}
 	indexForm = (Form_pg_index) GETSTRUCT(tuple);
-	/* We always mark indexes as clustered when we intecept a cluster command, if it's not marked as such here, something has gone wrong */
+
+	/*
+	 * We always mark indexes as clustered when we intecept a cluster command,
+	 * if it's not marked as such here, something has gone wrong
+	 */
 	if (!indexForm->indisclustered)
 		ereport(ERROR,
-			(errcode(ERRCODE_ASSERT_FAILURE),
-				errmsg("Invalid index heap during CLUSTER.")));
+				(errcode(ERRCODE_ASSERT_FAILURE),
+				 errmsg("Invalid index heap during CLUSTER.")));
 	ReleaseSysCache(tuple);
 
 	/*
@@ -211,8 +215,8 @@ timescale_recluster_rel(Oid tableOid, Oid indexOid, bool verbose)
 	 * locks.  Predicate locks on indexes will be promoted when they are
 	 * reindexed.
 	 */
-	//TODO read more in depth
-	//     specifically, in Exclusive, can new predicate locks be taken
+	// TODO read more in depth
+	//      specifically, in Exclusive, can new predicate locks be taken
 	TransferPredicateLocksToHeapRelation(OldHeap);
 
 	/* timescale_rebuild_relation does all the dirty work */
