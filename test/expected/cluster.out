@@ -90,6 +90,10 @@ WHERE indisclustered = true;
 CLUSTER VERBOSE _timescaledb_internal._hyper_1_2_chunk;
 INFO:  reclustering "_timescaledb_internal._hyper_1_2_chunk" using sequential scan and sort
 INFO:  "_hyper_1_2_chunk": found 0 removable, 1 nonremovable row versions in 1 pages
+-- CLUSTER a chunk directly with an explicit index
+CLUSTER VERBOSE _timescaledb_internal._hyper_1_2_chunk using cluster_test_time_idx;
+INFO:  reclustering "_timescaledb_internal._hyper_1_2_chunk" using sequential scan and sort
+INFO:  "_hyper_1_2_chunk": found 0 removable, 1 nonremovable row versions in 1 pages
 -- we should start read_optimized
 SELECT setting FROM pg_settings WHERE name = 'timescaledb.cluster_method';
     setting     
@@ -112,6 +116,9 @@ INFO:  clustering "_timescaledb_internal._hyper_1_2_chunk" using sequential scan
 INFO:  "_hyper_1_2_chunk": found 0 removable, 1 nonremovable row versions in 1 pages
 INFO:  clustering "_timescaledb_internal._hyper_1_1_chunk" using sequential scan and sort
 INFO:  "_hyper_1_1_chunk": found 0 removable, 1 nonremovable row versions in 1 pages
+CLUSTER VERBOSE _timescaledb_internal._hyper_1_2_chunk;
+INFO:  clustering "_timescaledb_internal._hyper_1_2_chunk" using sequential scan and sort
+INFO:  "_hyper_1_2_chunk": found 0 removable, 1 nonremovable row versions in 1 pages
 -- Set guc back
 UPDATE pg_settings SET setting = 'read_optimized' WHERE name = 'timescaledb.cluster_method';
    set_config   
@@ -127,3 +134,6 @@ INFO:  reclustering "_timescaledb_internal._hyper_1_2_chunk" using sequential sc
 INFO:  "_hyper_1_2_chunk": found 0 removable, 1 nonremovable row versions in 1 pages
 INFO:  reclustering "_timescaledb_internal._hyper_1_1_chunk" using sequential scan and sort
 INFO:  "_hyper_1_1_chunk": found 0 removable, 1 nonremovable row versions in 1 pages
+CLUSTER VERBOSE _timescaledb_internal._hyper_1_2_chunk;
+INFO:  reclustering "_timescaledb_internal._hyper_1_2_chunk" using sequential scan and sort
+INFO:  "_hyper_1_2_chunk": found 0 removable, 1 nonremovable row versions in 1 pages

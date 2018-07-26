@@ -44,6 +44,9 @@ WHERE indisclustered = true;
 -- CLUSTER a chunk directly
 CLUSTER VERBOSE _timescaledb_internal._hyper_1_2_chunk;
 
+-- CLUSTER a chunk directly with an explicit index
+CLUSTER VERBOSE _timescaledb_internal._hyper_1_2_chunk using cluster_test_time_idx;
+
 -- we should start read_optimized
 SELECT setting FROM pg_settings WHERE name = 'timescaledb.cluster_method';
 
@@ -52,9 +55,11 @@ UPDATE pg_settings SET setting = 'native' WHERE name = 'timescaledb.cluster_meth
 
 -- and old cluster should be run
 CLUSTER VERBOSE cluster_test USING cluster_test_time_location_idx;
+CLUSTER VERBOSE _timescaledb_internal._hyper_1_2_chunk;
 
 -- Set guc back
 UPDATE pg_settings SET setting = 'read_optimized' WHERE name = 'timescaledb.cluster_method';
 
 -- and new cluster should be run
 CLUSTER VERBOSE cluster_test USING cluster_test_time_location_idx;
+CLUSTER VERBOSE _timescaledb_internal._hyper_1_2_chunk;
