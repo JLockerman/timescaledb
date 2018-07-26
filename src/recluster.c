@@ -209,16 +209,6 @@ timescale_recluster_rel(Oid tableOid, Oid indexOid, bool verbose)
 	/* Check heap and index are valid to cluster on */
 	check_index_is_clusterable(OldHeap, indexOid, true, ExclusiveLock);
 
-	/*
-	 * All predicate locks on the tuples or pages are about to be made
-	 * invalid, because we move tuples around.  Promote them to relation
-	 * locks.  Predicate locks on indexes will be promoted when they are
-	 * reindexed.
-	 */
-	// TODO read more in depth
-	//      specifically, in Exclusive, can new predicate locks be taken
-	TransferPredicateLocksToHeapRelation(OldHeap);
-
 	/* timescale_rebuild_relation does all the dirty work */
 	timescale_rebuild_relation(OldHeap, indexOid, verbose);
 
@@ -730,6 +720,14 @@ finish_heap_swaps(Oid OIDOldHeap, Oid OIDNewHeap,
 				 errmsg("could not set deadlock_timeout guc.")));
 
 	oldHeapRel = heap_open(OIDOldHeap, AccessExclusiveLock);
+
+	/*
+	 * All predicate locks on the tuples or pages are about to be made
+	 * invalid, because we move tuples around.  Promote them to relation
+	 * locks.  Predicate locks on indexes will be promoted when they are
+	 * reindexed.
+	 */
+	TransferPredicateLocksToHeapRelation(oldHeapRel);
 
 	/*
 	 * Swap the contents of the heap relations (including any toast tables).
