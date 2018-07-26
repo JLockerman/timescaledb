@@ -1284,7 +1284,7 @@ recluster_chunk_by_index_map(ChunkIndexMapping *cim, bool verbose)
 
 	/* Do the job. */
 	if (GUC_TIMESCALE_CLUSTER_READ_OPT == guc_timescale_cluster)
-		timescale_recluster_rel(cim->chunkoid, cim->indexoid, true, verbose);
+		timescale_recluster_rel(cim->chunkoid, cim->indexoid, verbose);
 	else
 		cluster_rel(cim->chunkoid, cim->indexoid, true, verbose);
 }

@@ -99,9 +99,11 @@ static void swap_relation_files(Oid r1, Oid r2,
  * instead of index order.
  */
 void
-timescale_recluster_rel(Oid tableOid, Oid indexOid, bool recheck, bool verbose)
+timescale_recluster_rel(Oid tableOid, Oid indexOid, bool verbose)
 {
 	Relation	OldHeap;
+	HeapTuple	tuple;
+	Form_pg_index indexForm;
 
 	if (!OidIsValid(indexOid))
 		elog(ERROR, "Recluster must specify an index.");
@@ -119,75 +121,37 @@ timescale_recluster_rel(Oid tableOid, Oid indexOid, bool recheck, bool verbose)
 
 	/* If the table has gone away, we can skip processing it */
 	if (!OldHeap)
+	{
+		ereport(WARNING,
+			(errcode(ERRCODE_WARNING),
+				errmsg("Table disappeared during CLUSTER.")));
 		return;
+	}
+
 
 	/*
 	 * Since we may open a new transaction for each relation, we have to check
 	 * that the relation still is what we think it is.
-	 *
-	 * If this is a single-transaction CLUSTER, we can skip these tests. We
-	 * *must* skip the one on indisclustered since it would reject an attempt
-	 * to cluster a not-previously-clustered index.
 	 */
-	if (recheck)
+	/* Check that the user still owns the relation */
+	if (!pg_class_ownercheck(tableOid, GetUserId()))
 	{
-		HeapTuple	tuple;
-		Form_pg_index indexForm;
-
-		/* Check that the user still owns the relation */
-		if (!pg_class_ownercheck(tableOid, GetUserId()))
-		{
-			relation_close(OldHeap, ExclusiveLock);
-			ereport(WARNING,
-					(errcode(ERRCODE_WARNING),
-					 errmsg("Ownership change during CLUSTER.")));
-			return;
-		}
-
-		/*
-		 * Silently skip a temp table for a remote session.  Only doing this
-		 * check in the "recheck" case is appropriate (which currently means
-		 * somebody is executing a database-wide CLUSTER), because there is
-		 * another check in cluster() which will stop any attempt to cluster
-		 * remote temp tables by name.  There is another check in
-		 * timescale_cluster_rel which is redundant, but we leave it for extra
-		 * safety.
-		 */
-		if (OldHeap->rd_rel->relpersistence == RELPERSISTENCE_TEMP)
-			ereport(ERROR,
-					(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-					 errmsg("cannot recluster a temporary table.")));
-
-		if (OidIsValid(indexOid))
-		{
-			/*
-			 * Check that the index still exists
-			 */
-			if (!SearchSysCacheExists1(RELOID, ObjectIdGetDatum(indexOid)))
-			{
-				relation_close(OldHeap, ExclusiveLock);
-				return;
-			}
-
-			/*
-			 * Check that the index is still the one with indisclustered set.
-			 */
-			tuple = SearchSysCache1(INDEXRELID, ObjectIdGetDatum(indexOid));
-			if (!HeapTupleIsValid(tuple))	/* probably can't happen */
-			{
-				relation_close(OldHeap, ExclusiveLock);
-				return;
-			}
-			indexForm = (Form_pg_index) GETSTRUCT(tuple);
-			if (!indexForm->indisclustered)
-			{
-				ReleaseSysCache(tuple);
-				relation_close(OldHeap, ExclusiveLock);
-				return;
-			}
-			ReleaseSysCache(tuple);
-		}
+		relation_close(OldHeap, ExclusiveLock);
+		ereport(WARNING,
+				(errcode(ERRCODE_WARNING),
+					errmsg("Ownership change during CLUSTER.")));
+		return;
 	}
+
+	if (IsSystemRelation(OldHeap))
+		ereport(ERROR,
+			(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+				errmsg("Cannot recluster a system relation.")));
+
+	if (OldHeap->rd_rel->relpersistence != RELPERSISTENCE_PERMANENT)
+		ereport(ERROR,
+				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+					errmsg("can only recluster a permanent table.")));
 
 	/* We do not allow reclustering on shared catalogs. */
 	if (OldHeap->rd_rel->relisshared)
@@ -195,27 +159,51 @@ timescale_recluster_rel(Oid tableOid, Oid indexOid, bool recheck, bool verbose)
 				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
 				 errmsg("cannot recluster a shared catalog")));
 
+	if (OldHeap->rd_rel->relkind != RELKIND_RELATION)
+		ereport(ERROR,
+				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+				 errmsg("can only recluster a relation.")));
+
+	/*
+	* Check that the index still exists
+	*/
+	if (!SearchSysCacheExists1(RELOID, ObjectIdGetDatum(indexOid)))
+	{
+		ereport(WARNING,
+			(errcode(ERRCODE_WARNING),
+				errmsg("Index disappeared during CLUSTER.")));
+		relation_close(OldHeap, ExclusiveLock);
+		return;
+	}
+
+	/*
+	* Check that the index is still the one with indisclustered set.
+	*/
+	tuple = SearchSysCache1(INDEXRELID, ObjectIdGetDatum(indexOid));
+	if (!HeapTupleIsValid(tuple))	/* probably can't happen */
+	{
+		ereport(WARNING,
+			(errcode(ERRCODE_WARNING),
+				errmsg("Invalid index heap during CLUSTER.")));
+		relation_close(OldHeap, ExclusiveLock);
+		return;
+	}
+	indexForm = (Form_pg_index) GETSTRUCT(tuple);
+	/* We always mark indexes as clustered when we intecept a cluster command, if it's not marked as such here, something has gone wrong */
+	if (!indexForm->indisclustered)
+		ereport(ERROR,
+			(errcode(ERRCODE_ASSERT_FAILURE),
+				errmsg("Invalid index heap during CLUSTER.")));
+	ReleaseSysCache(tuple);
+
 	/*
 	 * Also check for active uses of the relation in the current transaction,
 	 * including open scans and pending AFTER trigger events.
 	 */
-	/* TODO is this check needed/valid? */
 	CheckTableNotInUse(OldHeap, "CLUSTER");
 
 	/* Check heap and index are valid to cluster on */
-	check_index_is_clusterable(OldHeap, indexOid, recheck, ExclusiveLock);
-
-	/*
-	 * Quietly ignore the request if this is a materialized view which has not
-	 * been populated from its query. No harm is done because there is no data
-	 * to deal with, and we don't want to throw an error if this is part of a
-	 * multi-relation request -- for example, CLUSTER was run on the entire
-	 * database.
-	 */
-	if (OldHeap->rd_rel->relkind == RELKIND_MATVIEW)
-		ereport(ERROR,
-				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-				 errmsg("cannot recluster a materialized view.")));
+	check_index_is_clusterable(OldHeap, indexOid, true, ExclusiveLock);
 
 	/*
 	 * All predicate locks on the tuples or pages are about to be made
@@ -223,6 +211,8 @@ timescale_recluster_rel(Oid tableOid, Oid indexOid, bool recheck, bool verbose)
 	 * locks.  Predicate locks on indexes will be promoted when they are
 	 * reindexed.
 	 */
+	//TODO read more in depth
+	//     specifically, in Exclusive, can new predicate locks be taken
 	TransferPredicateLocksToHeapRelation(OldHeap);
 
 	/* timescale_rebuild_relation does all the dirty work */
@@ -257,8 +247,6 @@ timescale_rebuild_relation(Relation OldHeap, Oid indexOid, bool verbose)
 
 	/* Remember info about rel before closing OldHeap */
 	relpersistence = OldHeap->rd_rel->relpersistence;
-	if (IsSystemRelation(OldHeap))
-		elog(ERROR, "Cannot recluster a system catalog.");
 
 	/* Close relcache entry, but keep lock until transaction commit */
 	heap_close(OldHeap, NoLock);
@@ -331,6 +319,7 @@ copy_heap_data(Oid OIDNewHeap, Oid OIDOldHeap, Oid OIDOldIndex, bool verbose,
 	 */
 	NewHeap = heap_open(OIDNewHeap, AccessExclusiveLock);
 	OldHeap = heap_open(OIDOldHeap, ExclusiveLock);
+
 	if (OidIsValid(OIDOldIndex))
 		OldIndex = index_open(OIDOldIndex, ExclusiveLock);
 	else
@@ -433,9 +422,6 @@ copy_heap_data(Oid OIDNewHeap, Oid OIDOldHeap, Oid OIDOldIndex, bool verbose,
 	/* return selected values to caller */
 	*pFreezeXid = FreezeXid;
 	*pCutoffMulti = MultiXactCutoff;
-
-	if (IsSystemRelation(OldHeap))
-		elog(ERROR, "Cannot recluster a system relation.");
 
 	/* Initialize the rewrite operation */
 	rwstate = begin_heap_rewrite(OldHeap, NewHeap, OldestXmin, FreezeXid,
@@ -757,7 +743,6 @@ finish_heap_swaps(Oid OIDOldHeap, Oid OIDNewHeap,
 		Oid			new_index_oid = lfirst_oid(new_index_cell);
 
 		swap_relation_files(old_index_oid, new_index_oid,
-		/* TODO */
 							swap_toast_by_content, true,
 							frozenXid, cutoffMulti);
 	}

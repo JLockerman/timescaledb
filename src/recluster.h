@@ -16,7 +16,6 @@
 #include "storage/lock.h"
 #include "utils/relcache.h"
 
-extern void timescale_recluster_rel(Oid tableOid, Oid indexOid, bool recheck,
-						bool verbose);
+extern void timescale_recluster_rel(Oid tableOid, Oid indexOid, bool verbose);
 
 #endif							/* TIMESCALEDB_RECLUSTER_H */
