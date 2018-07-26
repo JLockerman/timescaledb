@@ -47,6 +47,9 @@ CLUSTER VERBOSE _timescaledb_internal._hyper_1_2_chunk;
 -- CLUSTER a chunk directly with an explicit index
 CLUSTER VERBOSE _timescaledb_internal._hyper_1_2_chunk using cluster_test_time_idx;
 
+-- CLUSTER a chunk directly with an chunk index
+CLUSTER VERBOSE _timescaledb_internal._hyper_1_2_chunk using _hyper_1_2_chunk_cluster_test_time_idx;
+
 -- we should start read_optimized
 SELECT setting FROM pg_settings WHERE name = 'timescaledb.cluster_method';
 

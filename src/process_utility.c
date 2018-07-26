@@ -1088,7 +1088,9 @@ find_clustered_index(Oid table_relid)
 }
 
 static void recluster_chunk_by_index_map(ChunkIndexMapping *cim, bool verbose);
-static Oid	recluster_get_index_relid(Hypertable *ht, char *indexname);
+static Oid	recluster_get_hypertable_index_relid(Hypertable *ht, char *indexname);
+
+static bool recluster_chunk(ClusterStmt *stmt, Cache *hcache, bool is_top_level);
 
 static void
 recluster_permission_check(Hypertable *ht, bool is_top_level)
@@ -1120,6 +1122,7 @@ process_cluster_start(Node *parsetree, ProcessUtilityContext context)
 	Cache	   *hcache;
 	Hypertable *ht;
 	bool		is_top_level = (context == PROCESS_UTILITY_TOPLEVEL);
+	bool		reclustered = false;
 
 	Assert(IsA(stmt, ClusterStmt));
 
@@ -1135,47 +1138,9 @@ process_cluster_start(Node *parsetree, ProcessUtilityContext context)
 	/* If the relation wasn't a hypertable maybe it's a chunk. */
 	if (NULL == ht)
 	{
-		Oid			index_relid;
-		Chunk	   *chunk;
-		Oid			chunk_id = RangeVarGetRelid(stmt->relation, NoLock, true);
-
-		if (!OidIsValid(chunk_id))
-		{
-			cache_release(hcache);
-			return false;
-		}
-
-		chunk = chunk_get_by_relid(chunk_id, 0, false);
-
-		/* If the relation wasn't a chunk let postgres's cluster handle it. */
-		if (NULL == chunk)
-		{
-			cache_release(hcache);
-			return false;
-		}
-
-		ht = hypertable_cache_get_entry(hcache, chunk->hypertable_relid);
-
-		recluster_permission_check(ht, is_top_level);
-
-		index_relid = recluster_get_index_relid(ht, stmt->indexname);
-
-		if (!OidIsValid(index_relid))
-		{
-			/* Let regular process utility handle */
-			cache_release(hcache);
-			return false;
-		}
-
-		ChunkIndexMapping *cim = chunk_index_get_by_hypertable_indexrelid(chunk, index_relid);
-
-		Assert(cim != NULL);
-		Assert(cim->chunkoid == chunk_id);
-		recluster_chunk_by_index_map(cim, stmt->verbose);
-		cache_release(hcache);
-		return true;
+		reclustered = recluster_chunk(stmt, hcache, is_top_level);
 	}
-
+	else
 	{
 		Oid			index_relid;
 		List	   *chunk_indexes;
@@ -1185,14 +1150,11 @@ process_cluster_start(Node *parsetree, ProcessUtilityContext context)
 
 		recluster_permission_check(ht, is_top_level);
 
-		index_relid = recluster_get_index_relid(ht, stmt->indexname);
+		index_relid = recluster_get_hypertable_index_relid(ht, stmt->indexname);
 
+		/* Let regular process utility handle invalid indexes */
 		if (!OidIsValid(index_relid))
-		{
-			/* Let regular process utility handle */
-			cache_release(hcache);
-			return false;
-		}
+			goto recluster_cleanup;
 
 		/*
 		 * The list of chunks and their indexes need to be on a memory context
@@ -1240,13 +1202,69 @@ process_cluster_start(Node *parsetree, ProcessUtilityContext context)
 
 		/* Clean up working storage */
 		MemoryContextDelete(mcxt);
-		cache_release(hcache);
-		return true;
+		reclustered = true;
 	}
+
+recluster_cleanup:
+	cache_release(hcache);
+	return reclustered;
 }
 
-Oid
-recluster_get_index_relid(Hypertable *ht, char *indexname)
+static bool
+recluster_chunk(ClusterStmt *stmt, Cache *hcache, bool is_top_level)
+{
+	Oid			index_relid;
+	Chunk	   *chunk;
+	Hypertable *ht;
+	ChunkIndexMapping *cim;
+	Oid			chunk_id = RangeVarGetRelid(stmt->relation, NoLock, true);
+
+	if (!OidIsValid(chunk_id))
+		return false;
+
+	chunk = chunk_get_by_relid(chunk_id, 0, false);
+
+	/* If the relation wasn't a chunk let postgres's cluster handle it. */
+	if (NULL == chunk)
+		return false;
+
+	ht = hypertable_cache_get_entry(hcache, chunk->hypertable_relid);
+
+	recluster_permission_check(ht, is_top_level);
+
+	/* first check the hypertable for the index, also contains the NULL check */
+	index_relid = recluster_get_hypertable_index_relid(ht, stmt->indexname);
+
+	if (OidIsValid(index_relid))
+	{
+		cim = chunk_index_get_by_hypertable_indexrelid(chunk, index_relid);
+	}
+	else
+	{
+		/* we couldn't find the index on the hypertable, maybe it's a chunk index */
+		/* on NULL we get the index from the hypertable, if we cannot something is wrong */
+		if(NULL == stmt->indexname)
+			return false;
+
+		/* If we didn't find an index on the hypertable check if it exists on the chunk*/
+		index_relid = get_relname_relid(stmt->indexname, get_rel_namespace(chunk_id));
+
+		/* Let regular process utility handle invalid indexes */
+		if(!OidIsValid(index_relid))
+			return false;
+
+		cim = chunk_index_get_by_indexrelid(chunk, index_relid);
+	}
+
+	Assert(cim != NULL);
+	Assert(cim->chunkoid == chunk_id);
+	recluster_chunk_by_index_map(cim, stmt->verbose);
+	return true;
+}
+
+/* get te hypertable index for an indexname or InvalidOid if none exists */
+static Oid
+recluster_get_hypertable_index_relid(Hypertable *ht, char *indexname)
 {
 	if (NULL == indexname)
 		return find_clustered_index(ht->main_table_relid);

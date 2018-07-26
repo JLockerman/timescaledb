@@ -738,7 +738,7 @@ chunk_index_tuple_found(TupleInfo *ti, void *const data)
 }
 
 
-static ChunkIndexMapping *
+ChunkIndexMapping *
 chunk_index_get_by_indexrelid(Chunk *chunk, Oid chunk_indexrelid)
 {
 	ScanKeyData scankey[2];
