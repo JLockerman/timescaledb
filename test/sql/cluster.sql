@@ -300,6 +300,35 @@ $$);
 
 SELECT * FROM toast_test;
 
+CLUSTER VERBOSE toast_test USING toast_test_time_idx;
+
+-- after each test we ensure bitmap scans work
+BEGIN;
+    SET LOCAL enable_seqscan=false;
+    SET LOCAL enable_indexscan=false;
+    SET LOCAL enable_bitmapscan=true;
+    EXPLAIN (costs off) SELECT * FROM cluster_test WHERE time='2004-10-19 10:23:54';
+    SELECT * FROM toast_test WHERE time='2004-10-19 10:23:54';
+COMMIT;
+
+-- after each test we ensure index scans work
+BEGIN;
+    SET LOCAL enable_seqscan=false;
+    SET LOCAL enable_indexscan=true;
+    SET LOCAL enable_bitmapscan=false;
+    EXPLAIN (costs off) SELECT * FROM cluster_test WHERE time='2004-10-19 10:23:54';
+    SELECT * FROM toast_test WHERE time='2004-10-19 10:23:54';
+COMMIT;
+
+-- after each test we ensure sequntial scans work
+BEGIN;
+    SET LOCAL enable_seqscan=true;
+    SET LOCAL enable_indexscan=false;
+    SET LOCAL enable_bitmapscan=false;
+    EXPLAIN (costs off) SELECT * FROM cluster_test WHERE time='2004-10-19 10:23:54';
+    SELECT * FROM toast_test WHERE time='2004-10-19 10:23:54';
+COMMIT;
+
 -- force CLUSTER to vaccum the toast_table
 ALTER TABLE toast_test DROP COLUMN value;
 SELECT * FROM toast_test;
