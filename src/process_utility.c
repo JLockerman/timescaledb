@@ -40,6 +40,7 @@
 #include "extension.h"
 #include "guc.h"
 #include "hypercube.h"
+#include "hypertable.h"
 #include "hypertable_cache.h"
 #include "dimension_vector.h"
 #include "indexing.h"
@@ -1235,6 +1236,12 @@ process_cluster_start(Node *parsetree, ProcessUtilityContext context)
 		MemoryContextSwitchTo(old);
 
 		hcache->release_on_commit = false;
+
+		if(list_length(chunk_indexes) == 0)
+			if(list_length(find_inheritance_children(ht->main_table_relid, ExclusiveLock)) != 0)
+				ereport(ERROR,
+						(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+						errmsg("No chunks indicies for hypertable")));
 
 		/* Commit to get out of starting transaction */
 		PopActiveSnapshot();
