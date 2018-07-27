@@ -19,17 +19,21 @@ INSERT INTO cluster_test VALUES ('2017-01-20T09:00:01', 23.4, 1),
 -- after each test we ensure bitmap scans work
 BEGIN;
     SET LOCAL enable_seqscan=false;
+    SET LOCAL enable_indexscan=false;
+    SET LOCAL enable_bitmapscan=true;
     EXPLAIN (costs off) SELECT * FROM cluster_test WHERE time='2017-01-21T09:00:01';
                                           QUERY PLAN                                           
 -----------------------------------------------------------------------------------------------
  Append
-   ->  Index Scan using cluster_test_time_idx on cluster_test
-         Index Cond: ("time" = 'Sat Jan 21 09:00:01 2017 PST'::timestamp with time zone)
+   ->  Bitmap Heap Scan on cluster_test
+         Recheck Cond: ("time" = 'Sat Jan 21 09:00:01 2017 PST'::timestamp with time zone)
+         ->  Bitmap Index Scan on cluster_test_time_idx
+               Index Cond: ("time" = 'Sat Jan 21 09:00:01 2017 PST'::timestamp with time zone)
    ->  Bitmap Heap Scan on _hyper_1_2_chunk
          Recheck Cond: ("time" = 'Sat Jan 21 09:00:01 2017 PST'::timestamp with time zone)
          ->  Bitmap Index Scan on _hyper_1_2_chunk_cluster_test_time_idx
                Index Cond: ("time" = 'Sat Jan 21 09:00:01 2017 PST'::timestamp with time zone)
-(7 rows)
+(9 rows)
 
     SELECT * FROM cluster_test WHERE time='2017-01-21T09:00:01';
              time             | temp | location 
@@ -40,18 +44,18 @@ BEGIN;
 COMMIT;
 -- after each test we ensure index scans work
 BEGIN;
-    SET LOCAL enable_indexscan=false;
+    SET LOCAL enable_seqscan=false;
+    SET LOCAL enable_indexscan=true;
+    SET LOCAL enable_bitmapscan=false;
     EXPLAIN (costs off) SELECT * FROM cluster_test WHERE time='2017-01-21T09:00:01';
-                                          QUERY PLAN                                           
------------------------------------------------------------------------------------------------
+                                       QUERY PLAN                                        
+-----------------------------------------------------------------------------------------
  Append
-   ->  Seq Scan on cluster_test
-         Filter: ("time" = 'Sat Jan 21 09:00:01 2017 PST'::timestamp with time zone)
-   ->  Bitmap Heap Scan on _hyper_1_2_chunk
-         Recheck Cond: ("time" = 'Sat Jan 21 09:00:01 2017 PST'::timestamp with time zone)
-         ->  Bitmap Index Scan on _hyper_1_2_chunk_cluster_test_time_idx
-               Index Cond: ("time" = 'Sat Jan 21 09:00:01 2017 PST'::timestamp with time zone)
-(7 rows)
+   ->  Index Scan using cluster_test_time_idx on cluster_test
+         Index Cond: ("time" = 'Sat Jan 21 09:00:01 2017 PST'::timestamp with time zone)
+   ->  Index Scan using _hyper_1_2_chunk_cluster_test_time_idx on _hyper_1_2_chunk
+         Index Cond: ("time" = 'Sat Jan 21 09:00:01 2017 PST'::timestamp with time zone)
+(5 rows)
 
     SELECT * FROM cluster_test WHERE time='2017-01-21T09:00:01';
              time             | temp | location 
@@ -62,6 +66,7 @@ BEGIN;
 COMMIT;
 -- after each test we ensure sequntial scans work
 BEGIN;
+    SET LOCAL enable_seqscan=true;
     SET LOCAL enable_indexscan=false;
     SET LOCAL enable_bitmapscan=false;
     EXPLAIN (costs off) SELECT * FROM cluster_test WHERE time='2017-01-21T09:00:01';
@@ -87,8 +92,37 @@ INFO:  reclustering "_timescaledb_internal._hyper_1_2_chunk" using index scan on
 INFO:  "_hyper_1_2_chunk": found 0 removable, 1 nonremovable row versions in 1 pages
 INFO:  reclustering "_timescaledb_internal._hyper_1_1_chunk" using index scan on "_hyper_1_1_chunk_cluster_test_time_idx"
 INFO:  "_hyper_1_1_chunk": found 0 removable, 1 nonremovable row versions in 1 pages
+-- after each test we ensure bitmap scans work
 BEGIN;
     SET LOCAL enable_seqscan=false;
+    SET LOCAL enable_indexscan=false;
+    SET LOCAL enable_bitmapscan=true;
+    EXPLAIN (costs off) SELECT * FROM cluster_test WHERE time='2017-01-21T09:00:01';
+                                          QUERY PLAN                                           
+-----------------------------------------------------------------------------------------------
+ Append
+   ->  Bitmap Heap Scan on cluster_test
+         Recheck Cond: ("time" = 'Sat Jan 21 09:00:01 2017 PST'::timestamp with time zone)
+         ->  Bitmap Index Scan on cluster_test_time_idx
+               Index Cond: ("time" = 'Sat Jan 21 09:00:01 2017 PST'::timestamp with time zone)
+   ->  Bitmap Heap Scan on _hyper_1_2_chunk
+         Recheck Cond: ("time" = 'Sat Jan 21 09:00:01 2017 PST'::timestamp with time zone)
+         ->  Bitmap Index Scan on _hyper_1_2_chunk_cluster_test_time_idx
+               Index Cond: ("time" = 'Sat Jan 21 09:00:01 2017 PST'::timestamp with time zone)
+(9 rows)
+
+    SELECT * FROM cluster_test WHERE time='2017-01-21T09:00:01';
+             time             | temp | location 
+------------------------------+------+----------
+ Sat Jan 21 09:00:01 2017 PST | 21.3 |        2
+(1 row)
+
+COMMIT;
+-- after each test we ensure index scans work
+BEGIN;
+    SET LOCAL enable_seqscan=false;
+    SET LOCAL enable_indexscan=true;
+    SET LOCAL enable_bitmapscan=false;
     EXPLAIN (costs off) SELECT * FROM cluster_test WHERE time='2017-01-21T09:00:01';
                                        QUERY PLAN                                        
 -----------------------------------------------------------------------------------------
@@ -106,26 +140,9 @@ BEGIN;
 (1 row)
 
 COMMIT;
+-- after each test we ensure sequntial scans work
 BEGIN;
-    SET LOCAL enable_indexscan=false;
-    EXPLAIN (costs off) SELECT * FROM cluster_test WHERE time='2017-01-21T09:00:01';
-                                     QUERY PLAN                                      
--------------------------------------------------------------------------------------
- Append
-   ->  Seq Scan on cluster_test
-         Filter: ("time" = 'Sat Jan 21 09:00:01 2017 PST'::timestamp with time zone)
-   ->  Seq Scan on _hyper_1_2_chunk
-         Filter: ("time" = 'Sat Jan 21 09:00:01 2017 PST'::timestamp with time zone)
-(5 rows)
-
-    SELECT * FROM cluster_test WHERE time='2017-01-21T09:00:01';
-             time             | temp | location 
-------------------------------+------+----------
- Sat Jan 21 09:00:01 2017 PST | 21.3 |        2
-(1 row)
-
-COMMIT;
-BEGIN;
+    SET LOCAL enable_seqscan=true;
     SET LOCAL enable_indexscan=false;
     SET LOCAL enable_bitmapscan=false;
     EXPLAIN (costs off) SELECT * FROM cluster_test WHERE time='2017-01-21T09:00:01';
@@ -166,8 +183,37 @@ INFO:  reclustering "_timescaledb_internal._hyper_1_2_chunk" using sequential sc
 INFO:  "_hyper_1_2_chunk": found 0 removable, 1 nonremovable row versions in 1 pages
 INFO:  reclustering "_timescaledb_internal._hyper_1_1_chunk" using sequential scan and sort
 INFO:  "_hyper_1_1_chunk": found 0 removable, 1 nonremovable row versions in 1 pages
+-- after each test we ensure bitmap scans work
 BEGIN;
     SET LOCAL enable_seqscan=false;
+    SET LOCAL enable_indexscan=false;
+    SET LOCAL enable_bitmapscan=true;
+    EXPLAIN (costs off) SELECT * FROM cluster_test WHERE time='2017-01-21T09:00:01';
+                                          QUERY PLAN                                           
+-----------------------------------------------------------------------------------------------
+ Append
+   ->  Bitmap Heap Scan on cluster_test
+         Recheck Cond: ("time" = 'Sat Jan 21 09:00:01 2017 PST'::timestamp with time zone)
+         ->  Bitmap Index Scan on cluster_test_time_idx
+               Index Cond: ("time" = 'Sat Jan 21 09:00:01 2017 PST'::timestamp with time zone)
+   ->  Bitmap Heap Scan on _hyper_1_2_chunk
+         Recheck Cond: ("time" = 'Sat Jan 21 09:00:01 2017 PST'::timestamp with time zone)
+         ->  Bitmap Index Scan on _hyper_1_2_chunk_cluster_test_time_idx
+               Index Cond: ("time" = 'Sat Jan 21 09:00:01 2017 PST'::timestamp with time zone)
+(9 rows)
+
+    SELECT * FROM cluster_test WHERE time='2017-01-21T09:00:01';
+             time             | temp | location 
+------------------------------+------+----------
+ Sat Jan 21 09:00:01 2017 PST | 21.3 |        2
+(1 row)
+
+COMMIT;
+-- after each test we ensure index scans work
+BEGIN;
+    SET LOCAL enable_seqscan=false;
+    SET LOCAL enable_indexscan=true;
+    SET LOCAL enable_bitmapscan=false;
     EXPLAIN (costs off) SELECT * FROM cluster_test WHERE time='2017-01-21T09:00:01';
                                        QUERY PLAN                                        
 -----------------------------------------------------------------------------------------
@@ -185,26 +231,9 @@ BEGIN;
 (1 row)
 
 COMMIT;
+-- after each test we ensure sequntial scans work
 BEGIN;
-    SET LOCAL enable_indexscan=false;
-    EXPLAIN (costs off) SELECT * FROM cluster_test WHERE time='2017-01-21T09:00:01';
-                                     QUERY PLAN                                      
--------------------------------------------------------------------------------------
- Append
-   ->  Seq Scan on cluster_test
-         Filter: ("time" = 'Sat Jan 21 09:00:01 2017 PST'::timestamp with time zone)
-   ->  Seq Scan on _hyper_1_2_chunk
-         Filter: ("time" = 'Sat Jan 21 09:00:01 2017 PST'::timestamp with time zone)
-(5 rows)
-
-    SELECT * FROM cluster_test WHERE time='2017-01-21T09:00:01';
-             time             | temp | location 
-------------------------------+------+----------
- Sat Jan 21 09:00:01 2017 PST | 21.3 |        2
-(1 row)
-
-COMMIT;
-BEGIN;
+    SET LOCAL enable_seqscan=true;
     SET LOCAL enable_indexscan=false;
     SET LOCAL enable_bitmapscan=false;
     EXPLAIN (costs off) SELECT * FROM cluster_test WHERE time='2017-01-21T09:00:01';
@@ -246,8 +275,37 @@ INFO:  clustering "_timescaledb_internal._hyper_1_1_chunk" using sequential scan
 INFO:  "_hyper_1_1_chunk": found 0 removable, 1 nonremovable row versions in 1 pages
 INFO:  clustering "_timescaledb_internal._hyper_1_2_chunk" using sequential scan and sort
 INFO:  "_hyper_1_2_chunk": found 0 removable, 1 nonremovable row versions in 1 pages
+-- after each test we ensure bitmap scans work
 BEGIN;
     SET LOCAL enable_seqscan=false;
+    SET LOCAL enable_indexscan=false;
+    SET LOCAL enable_bitmapscan=true;
+    EXPLAIN (costs off) SELECT * FROM cluster_test WHERE time='2017-01-21T09:00:01';
+                                          QUERY PLAN                                           
+-----------------------------------------------------------------------------------------------
+ Append
+   ->  Bitmap Heap Scan on cluster_test
+         Recheck Cond: ("time" = 'Sat Jan 21 09:00:01 2017 PST'::timestamp with time zone)
+         ->  Bitmap Index Scan on cluster_test_time_idx
+               Index Cond: ("time" = 'Sat Jan 21 09:00:01 2017 PST'::timestamp with time zone)
+   ->  Bitmap Heap Scan on _hyper_1_2_chunk
+         Recheck Cond: ("time" = 'Sat Jan 21 09:00:01 2017 PST'::timestamp with time zone)
+         ->  Bitmap Index Scan on _hyper_1_2_chunk_cluster_test_time_idx
+               Index Cond: ("time" = 'Sat Jan 21 09:00:01 2017 PST'::timestamp with time zone)
+(9 rows)
+
+    SELECT * FROM cluster_test WHERE time='2017-01-21T09:00:01';
+             time             | temp | location 
+------------------------------+------+----------
+ Sat Jan 21 09:00:01 2017 PST | 21.3 |        2
+(1 row)
+
+COMMIT;
+-- after each test we ensure index scans work
+BEGIN;
+    SET LOCAL enable_seqscan=false;
+    SET LOCAL enable_indexscan=true;
+    SET LOCAL enable_bitmapscan=false;
     EXPLAIN (costs off) SELECT * FROM cluster_test WHERE time='2017-01-21T09:00:01';
                                        QUERY PLAN                                        
 -----------------------------------------------------------------------------------------
@@ -265,26 +323,9 @@ BEGIN;
 (1 row)
 
 COMMIT;
+-- after each test we ensure sequntial scans work
 BEGIN;
-    SET LOCAL enable_indexscan=false;
-    EXPLAIN (costs off) SELECT * FROM cluster_test WHERE time='2017-01-21T09:00:01';
-                                     QUERY PLAN                                      
--------------------------------------------------------------------------------------
- Append
-   ->  Seq Scan on cluster_test
-         Filter: ("time" = 'Sat Jan 21 09:00:01 2017 PST'::timestamp with time zone)
-   ->  Seq Scan on _hyper_1_2_chunk
-         Filter: ("time" = 'Sat Jan 21 09:00:01 2017 PST'::timestamp with time zone)
-(5 rows)
-
-    SELECT * FROM cluster_test WHERE time='2017-01-21T09:00:01';
-             time             | temp | location 
-------------------------------+------+----------
- Sat Jan 21 09:00:01 2017 PST | 21.3 |        2
-(1 row)
-
-COMMIT;
-BEGIN;
+    SET LOCAL enable_seqscan=true;
     SET LOCAL enable_indexscan=false;
     SET LOCAL enable_bitmapscan=false;
     EXPLAIN (costs off) SELECT * FROM cluster_test WHERE time='2017-01-21T09:00:01';
@@ -313,8 +354,37 @@ INFO:  reclustering "_timescaledb_internal._hyper_1_2_chunk" using sequential sc
 INFO:  "_hyper_1_2_chunk": found 0 removable, 1 nonremovable row versions in 1 pages
 INFO:  reclustering "_timescaledb_internal._hyper_1_1_chunk" using sequential scan and sort
 INFO:  "_hyper_1_1_chunk": found 0 removable, 1 nonremovable row versions in 1 pages
+-- after each test we ensure bitmap scans work
 BEGIN;
     SET LOCAL enable_seqscan=false;
+    SET LOCAL enable_indexscan=false;
+    SET LOCAL enable_bitmapscan=true;
+    EXPLAIN (costs off) SELECT * FROM cluster_test WHERE time='2017-01-21T09:00:01';
+                                          QUERY PLAN                                           
+-----------------------------------------------------------------------------------------------
+ Append
+   ->  Bitmap Heap Scan on cluster_test
+         Recheck Cond: ("time" = 'Sat Jan 21 09:00:01 2017 PST'::timestamp with time zone)
+         ->  Bitmap Index Scan on cluster_test_time_location_idx
+               Index Cond: ("time" = 'Sat Jan 21 09:00:01 2017 PST'::timestamp with time zone)
+   ->  Bitmap Heap Scan on _hyper_1_2_chunk
+         Recheck Cond: ("time" = 'Sat Jan 21 09:00:01 2017 PST'::timestamp with time zone)
+         ->  Bitmap Index Scan on _hyper_1_2_chunk_time_location_idx
+               Index Cond: ("time" = 'Sat Jan 21 09:00:01 2017 PST'::timestamp with time zone)
+(9 rows)
+
+    SELECT * FROM cluster_test WHERE time='2017-01-21T09:00:01';
+             time             | temp | location 
+------------------------------+------+----------
+ Sat Jan 21 09:00:01 2017 PST | 21.3 |        2
+(1 row)
+
+COMMIT;
+-- after each test we ensure index scans work
+BEGIN;
+    SET LOCAL enable_seqscan=false;
+    SET LOCAL enable_indexscan=true;
+    SET LOCAL enable_bitmapscan=false;
     EXPLAIN (costs off) SELECT * FROM cluster_test WHERE time='2017-01-21T09:00:01';
                                        QUERY PLAN                                        
 -----------------------------------------------------------------------------------------
@@ -332,26 +402,9 @@ BEGIN;
 (1 row)
 
 COMMIT;
+-- after each test we ensure sequntial scans work
 BEGIN;
-    SET LOCAL enable_indexscan=false;
-    EXPLAIN (costs off) SELECT * FROM cluster_test WHERE time='2017-01-21T09:00:01';
-                                     QUERY PLAN                                      
--------------------------------------------------------------------------------------
- Append
-   ->  Seq Scan on cluster_test
-         Filter: ("time" = 'Sat Jan 21 09:00:01 2017 PST'::timestamp with time zone)
-   ->  Seq Scan on _hyper_1_2_chunk
-         Filter: ("time" = 'Sat Jan 21 09:00:01 2017 PST'::timestamp with time zone)
-(5 rows)
-
-    SELECT * FROM cluster_test WHERE time='2017-01-21T09:00:01';
-             time             | temp | location 
-------------------------------+------+----------
- Sat Jan 21 09:00:01 2017 PST | 21.3 |        2
-(1 row)
-
-COMMIT;
-BEGIN;
+    SET LOCAL enable_seqscan=true;
     SET LOCAL enable_indexscan=false;
     SET LOCAL enable_bitmapscan=false;
     EXPLAIN (costs off) SELECT * FROM cluster_test WHERE time='2017-01-21T09:00:01';
@@ -395,8 +448,37 @@ INFO:  "_hyper_1_2_chunk": found 0 removable, 1 nonremovable row versions in 1 p
 CLUSTER VERBOSE _timescaledb_internal._hyper_1_2_chunk using _hyper_1_2_chunk_cluster_test_time_idx;
 INFO:  reclustering "_timescaledb_internal._hyper_1_2_chunk" using sequential scan and sort
 INFO:  "_hyper_1_2_chunk": found 0 removable, 1 nonremovable row versions in 1 pages
+-- after each test we ensure bitmap scans work
 BEGIN;
     SET LOCAL enable_seqscan=false;
+    SET LOCAL enable_indexscan=false;
+    SET LOCAL enable_bitmapscan=true;
+    EXPLAIN (costs off) SELECT * FROM cluster_test WHERE time='2017-01-21T09:00:01';
+                                          QUERY PLAN                                           
+-----------------------------------------------------------------------------------------------
+ Append
+   ->  Bitmap Heap Scan on cluster_test
+         Recheck Cond: ("time" = 'Sat Jan 21 09:00:01 2017 PST'::timestamp with time zone)
+         ->  Bitmap Index Scan on cluster_test_time_location_idx
+               Index Cond: ("time" = 'Sat Jan 21 09:00:01 2017 PST'::timestamp with time zone)
+   ->  Bitmap Heap Scan on _hyper_1_2_chunk
+         Recheck Cond: ("time" = 'Sat Jan 21 09:00:01 2017 PST'::timestamp with time zone)
+         ->  Bitmap Index Scan on _hyper_1_2_chunk_time_location_idx
+               Index Cond: ("time" = 'Sat Jan 21 09:00:01 2017 PST'::timestamp with time zone)
+(9 rows)
+
+    SELECT * FROM cluster_test WHERE time='2017-01-21T09:00:01';
+             time             | temp | location 
+------------------------------+------+----------
+ Sat Jan 21 09:00:01 2017 PST | 21.3 |        2
+(1 row)
+
+COMMIT;
+-- after each test we ensure index scans work
+BEGIN;
+    SET LOCAL enable_seqscan=false;
+    SET LOCAL enable_indexscan=true;
+    SET LOCAL enable_bitmapscan=false;
     EXPLAIN (costs off) SELECT * FROM cluster_test WHERE time='2017-01-21T09:00:01';
                                        QUERY PLAN                                        
 -----------------------------------------------------------------------------------------
@@ -414,26 +496,9 @@ BEGIN;
 (1 row)
 
 COMMIT;
+-- after each test we ensure sequntial scans work
 BEGIN;
-    SET LOCAL enable_indexscan=false;
-    EXPLAIN (costs off) SELECT * FROM cluster_test WHERE time='2017-01-21T09:00:01';
-                                     QUERY PLAN                                      
--------------------------------------------------------------------------------------
- Append
-   ->  Seq Scan on cluster_test
-         Filter: ("time" = 'Sat Jan 21 09:00:01 2017 PST'::timestamp with time zone)
-   ->  Seq Scan on _hyper_1_2_chunk
-         Filter: ("time" = 'Sat Jan 21 09:00:01 2017 PST'::timestamp with time zone)
-(5 rows)
-
-    SELECT * FROM cluster_test WHERE time='2017-01-21T09:00:01';
-             time             | temp | location 
-------------------------------+------+----------
- Sat Jan 21 09:00:01 2017 PST | 21.3 |        2
-(1 row)
-
-COMMIT;
-BEGIN;
+    SET LOCAL enable_seqscan=true;
     SET LOCAL enable_indexscan=false;
     SET LOCAL enable_bitmapscan=false;
     EXPLAIN (costs off) SELECT * FROM cluster_test WHERE time='2017-01-21T09:00:01';
@@ -478,8 +543,37 @@ INFO:  "_hyper_1_1_chunk": found 0 removable, 1 nonremovable row versions in 1 p
 CLUSTER VERBOSE _timescaledb_internal._hyper_1_2_chunk;
 INFO:  clustering "_timescaledb_internal._hyper_1_2_chunk" using sequential scan and sort
 INFO:  "_hyper_1_2_chunk": found 0 removable, 1 nonremovable row versions in 1 pages
+-- after each test we ensure bitmap scans work
 BEGIN;
     SET LOCAL enable_seqscan=false;
+    SET LOCAL enable_indexscan=false;
+    SET LOCAL enable_bitmapscan=true;
+    EXPLAIN (costs off) SELECT * FROM cluster_test WHERE time='2017-01-21T09:00:01';
+                                          QUERY PLAN                                           
+-----------------------------------------------------------------------------------------------
+ Append
+   ->  Bitmap Heap Scan on cluster_test
+         Recheck Cond: ("time" = 'Sat Jan 21 09:00:01 2017 PST'::timestamp with time zone)
+         ->  Bitmap Index Scan on cluster_test_time_location_idx
+               Index Cond: ("time" = 'Sat Jan 21 09:00:01 2017 PST'::timestamp with time zone)
+   ->  Bitmap Heap Scan on _hyper_1_2_chunk
+         Recheck Cond: ("time" = 'Sat Jan 21 09:00:01 2017 PST'::timestamp with time zone)
+         ->  Bitmap Index Scan on _hyper_1_2_chunk_time_location_idx
+               Index Cond: ("time" = 'Sat Jan 21 09:00:01 2017 PST'::timestamp with time zone)
+(9 rows)
+
+    SELECT * FROM cluster_test WHERE time='2017-01-21T09:00:01';
+             time             | temp | location 
+------------------------------+------+----------
+ Sat Jan 21 09:00:01 2017 PST | 21.3 |        2
+(1 row)
+
+COMMIT;
+-- after each test we ensure index scans work
+BEGIN;
+    SET LOCAL enable_seqscan=false;
+    SET LOCAL enable_indexscan=true;
+    SET LOCAL enable_bitmapscan=false;
     EXPLAIN (costs off) SELECT * FROM cluster_test WHERE time='2017-01-21T09:00:01';
                                        QUERY PLAN                                        
 -----------------------------------------------------------------------------------------
@@ -497,26 +591,9 @@ BEGIN;
 (1 row)
 
 COMMIT;
+-- after each test we ensure sequntial scans work
 BEGIN;
-    SET LOCAL enable_indexscan=false;
-    EXPLAIN (costs off) SELECT * FROM cluster_test WHERE time='2017-01-21T09:00:01';
-                                     QUERY PLAN                                      
--------------------------------------------------------------------------------------
- Append
-   ->  Seq Scan on cluster_test
-         Filter: ("time" = 'Sat Jan 21 09:00:01 2017 PST'::timestamp with time zone)
-   ->  Seq Scan on _hyper_1_2_chunk
-         Filter: ("time" = 'Sat Jan 21 09:00:01 2017 PST'::timestamp with time zone)
-(5 rows)
-
-    SELECT * FROM cluster_test WHERE time='2017-01-21T09:00:01';
-             time             | temp | location 
-------------------------------+------+----------
- Sat Jan 21 09:00:01 2017 PST | 21.3 |        2
-(1 row)
-
-COMMIT;
-BEGIN;
+    SET LOCAL enable_seqscan=true;
     SET LOCAL enable_indexscan=false;
     SET LOCAL enable_bitmapscan=false;
     EXPLAIN (costs off) SELECT * FROM cluster_test WHERE time='2017-01-21T09:00:01';
@@ -554,8 +631,37 @@ INFO:  "_hyper_1_1_chunk": found 0 removable, 1 nonremovable row versions in 1 p
 CLUSTER VERBOSE _timescaledb_internal._hyper_1_2_chunk;
 INFO:  reclustering "_timescaledb_internal._hyper_1_2_chunk" using sequential scan and sort
 INFO:  "_hyper_1_2_chunk": found 0 removable, 1 nonremovable row versions in 1 pages
+-- after each test we ensure bitmap scans work
 BEGIN;
     SET LOCAL enable_seqscan=false;
+    SET LOCAL enable_indexscan=false;
+    SET LOCAL enable_bitmapscan=true;
+    EXPLAIN (costs off) SELECT * FROM cluster_test WHERE time='2017-01-21T09:00:01';
+                                          QUERY PLAN                                           
+-----------------------------------------------------------------------------------------------
+ Append
+   ->  Bitmap Heap Scan on cluster_test
+         Recheck Cond: ("time" = 'Sat Jan 21 09:00:01 2017 PST'::timestamp with time zone)
+         ->  Bitmap Index Scan on cluster_test_time_location_idx
+               Index Cond: ("time" = 'Sat Jan 21 09:00:01 2017 PST'::timestamp with time zone)
+   ->  Bitmap Heap Scan on _hyper_1_2_chunk
+         Recheck Cond: ("time" = 'Sat Jan 21 09:00:01 2017 PST'::timestamp with time zone)
+         ->  Bitmap Index Scan on _hyper_1_2_chunk_time_location_idx
+               Index Cond: ("time" = 'Sat Jan 21 09:00:01 2017 PST'::timestamp with time zone)
+(9 rows)
+
+    SELECT * FROM cluster_test WHERE time='2017-01-21T09:00:01';
+             time             | temp | location 
+------------------------------+------+----------
+ Sat Jan 21 09:00:01 2017 PST | 21.3 |        2
+(1 row)
+
+COMMIT;
+-- after each test we ensure index scans work
+BEGIN;
+    SET LOCAL enable_seqscan=false;
+    SET LOCAL enable_indexscan=true;
+    SET LOCAL enable_bitmapscan=false;
     EXPLAIN (costs off) SELECT * FROM cluster_test WHERE time='2017-01-21T09:00:01';
                                        QUERY PLAN                                        
 -----------------------------------------------------------------------------------------
@@ -573,26 +679,9 @@ BEGIN;
 (1 row)
 
 COMMIT;
+-- after each test we ensure sequntial scans work
 BEGIN;
-    SET LOCAL enable_indexscan=false;
-    EXPLAIN (costs off) SELECT * FROM cluster_test WHERE time='2017-01-21T09:00:01';
-                                     QUERY PLAN                                      
--------------------------------------------------------------------------------------
- Append
-   ->  Seq Scan on cluster_test
-         Filter: ("time" = 'Sat Jan 21 09:00:01 2017 PST'::timestamp with time zone)
-   ->  Seq Scan on _hyper_1_2_chunk
-         Filter: ("time" = 'Sat Jan 21 09:00:01 2017 PST'::timestamp with time zone)
-(5 rows)
-
-    SELECT * FROM cluster_test WHERE time='2017-01-21T09:00:01';
-             time             | temp | location 
-------------------------------+------+----------
- Sat Jan 21 09:00:01 2017 PST | 21.3 |        2
-(1 row)
-
-COMMIT;
-BEGIN;
+    SET LOCAL enable_seqscan=true;
     SET LOCAL enable_indexscan=false;
     SET LOCAL enable_bitmapscan=false;
     EXPLAIN (costs off) SELECT * FROM cluster_test WHERE time='2017-01-21T09:00:01';
@@ -635,7 +724,9 @@ SELECT * FROM toast_test;
                           | 
 (1 row)
 
-CLUSTER VERBOSE toast_test USING cluster_test_time_idx;
+CLUSTER VERBOSE toast_test USING toast_test_time_idx;
+INFO:  reclustering "_timescaledb_internal._hyper_2_4_chunk" using index scan on "_hyper_2_4_chunk_toast_test_time_idx"
+INFO:  "_hyper_2_4_chunk": found 0 removable, 1 nonremovable row versions in 1 pages
 SELECT * FROM toast_test;
            time           |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    value                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    
 --------------------------+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -644,7 +735,7 @@ SELECT * FROM toast_test;
                           | 
 (1 row)
 
--- force CLUSTER to vaccume the toast_table
+-- force CLUSTER to vaccum the toast_table
 ALTER TABLE toast_test DROP COLUMN value;
 SELECT * FROM toast_test;
            time           
@@ -659,6 +750,70 @@ SELECT * FROM toast_test;
  Tue Oct 19 10:23:54 2004
 (1 row)
 
+-- after each test we ensure bitmap scans work
+BEGIN;
+    SET LOCAL enable_seqscan=false;
+    SET LOCAL enable_indexscan=false;
+    SET LOCAL enable_bitmapscan=true;
+    EXPLAIN (costs off) SELECT * FROM cluster_test WHERE time='2004-10-19 10:23:54';
+                                          QUERY PLAN                                           
+-----------------------------------------------------------------------------------------------
+ Append
+   ->  Bitmap Heap Scan on cluster_test
+         Recheck Cond: ("time" = 'Tue Oct 19 10:23:54 2004 PDT'::timestamp with time zone)
+         ->  Bitmap Index Scan on cluster_test_time_location_idx
+               Index Cond: ("time" = 'Tue Oct 19 10:23:54 2004 PDT'::timestamp with time zone)
+(5 rows)
+
+    SELECT * FROM toast_test WHERE time='2004-10-19 10:23:54';
+           time           
+--------------------------
+ Tue Oct 19 10:23:54 2004
+(1 row)
+
+COMMIT;
+-- after each test we ensure index scans work
+BEGIN;
+    SET LOCAL enable_seqscan=false;
+    SET LOCAL enable_indexscan=true;
+    SET LOCAL enable_bitmapscan=false;
+    EXPLAIN (costs off) SELECT * FROM cluster_test WHERE time='2004-10-19 10:23:54';
+                                       QUERY PLAN                                        
+-----------------------------------------------------------------------------------------
+ Append
+   ->  Index Scan using cluster_test_time_location_idx on cluster_test
+         Index Cond: ("time" = 'Tue Oct 19 10:23:54 2004 PDT'::timestamp with time zone)
+(3 rows)
+
+    SELECT * FROM toast_test WHERE time='2004-10-19 10:23:54';
+           time           
+--------------------------
+ Tue Oct 19 10:23:54 2004
+(1 row)
+
+COMMIT;
+-- after each test we ensure sequntial scans work
+BEGIN;
+    SET LOCAL enable_seqscan=true;
+    SET LOCAL enable_indexscan=false;
+    SET LOCAL enable_bitmapscan=false;
+    EXPLAIN (costs off) SELECT * FROM cluster_test WHERE time='2004-10-19 10:23:54';
+                                     QUERY PLAN                                      
+-------------------------------------------------------------------------------------
+ Append
+   ->  Seq Scan on cluster_test
+         Filter: ("time" = 'Tue Oct 19 10:23:54 2004 PDT'::timestamp with time zone)
+(3 rows)
+
+    SELECT * FROM toast_test WHERE time='2004-10-19 10:23:54';
+           time           
+--------------------------
+ Tue Oct 19 10:23:54 2004
+(1 row)
+
+COMMIT;
+-- if we someone elses index error
+CLUSTER VERBOSE toast_test USING cluster_test_time_idx;
 --check the setting of cluster indexes on hypertables and chunks
 ALTER TABLE cluster_test CLUSTER ON cluster_test_time_idx;
 SELECT indexrelid::regclass, indisclustered
@@ -671,7 +826,8 @@ ORDER BY 1,2;
  _timescaledb_internal._hyper_1_1_chunk_cluster_test_time_idx | t
  _timescaledb_internal._hyper_1_2_chunk_cluster_test_time_idx | t
  _timescaledb_internal._hyper_1_3_chunk_cluster_test_time_idx | t
-(4 rows)
+ _timescaledb_internal._hyper_2_4_chunk_toast_test_time_idx   | t
+(5 rows)
 
 CLUSTER VERBOSE cluster_test;
 INFO:  reclustering "_timescaledb_internal._hyper_1_3_chunk" using sequential scan and sort
@@ -685,9 +841,10 @@ SELECT indexrelid::regclass, indisclustered
 FROM pg_index
 WHERE indisclustered = true
 ORDER BY 1,2;
- indexrelid | indisclustered 
-------------+----------------
-(0 rows)
+                         indexrelid                         | indisclustered 
+------------------------------------------------------------+----------------
+ _timescaledb_internal._hyper_2_4_chunk_toast_test_time_idx | t
+(1 row)
 
 \set ON_ERROR_STOP 0
 CLUSTER VERBOSE cluster_test;
@@ -701,7 +858,8 @@ ORDER BY 1,2;
                           indexrelid                          | indisclustered 
 --------------------------------------------------------------+----------------
  _timescaledb_internal._hyper_1_1_chunk_cluster_test_time_idx | t
-(1 row)
+ _timescaledb_internal._hyper_2_4_chunk_toast_test_time_idx   | t
+(2 rows)
 
 CLUSTER VERBOSE _timescaledb_internal._hyper_1_1_chunk;
 INFO:  reclustering "_timescaledb_internal._hyper_1_1_chunk" using sequential scan and sort
@@ -711,9 +869,10 @@ SELECT indexrelid::regclass, indisclustered
 FROM pg_index
 WHERE indisclustered = true
 ORDER BY 1,2;
- indexrelid | indisclustered 
-------------+----------------
-(0 rows)
+                         indexrelid                         | indisclustered 
+------------------------------------------------------------+----------------
+ _timescaledb_internal._hyper_2_4_chunk_toast_test_time_idx | t
+(1 row)
 
 \set ON_ERROR_STOP 0
 CLUSTER VERBOSE _timescaledb_internal._hyper_1_1_chunk;
