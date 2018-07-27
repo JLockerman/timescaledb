@@ -1200,11 +1200,23 @@ process_cluster_start(Node *parsetree, ProcessUtilityContext context)
 		if (NULL == stmt->indexname)
 			index_relid = find_clustered_index(ht->main_table_relid);
 		else
+		{
+			bool		index_in_ht;
+			Relation	ht_rel;
 			index_relid = get_relname_relid(stmt->indexname, get_rel_namespace(ht->main_table_relid));
+			ht_rel = heap_open(ht->main_table_relid, NoLock);
+			index_in_ht = list_member_oid(RelationGetIndexList(ht_rel), index_relid);
+			heap_close(ht_rel, NoLock);
+			if(!index_in_ht)
+				goto recluster_cleanup;
+		}
+			
 
 		/* Let regular process utility handle invalid indexes */
 		if (!OidIsValid(index_relid))
 			goto recluster_cleanup;
+
+			
 
 		/*
 		 * The list of chunks and their indexes need to be on a memory context

@@ -5,6 +5,9 @@ SELECT create_hypertable('cluster_test', 'time', chunk_time_interval => interval
 -- Show default indexes
 SELECT * FROM test.show_indexes('cluster_test');
 
+-- Run cluster on empty table
+CLUSTER VERBOSE cluster_test USING cluster_test_time_idx;
+
 -- Create two chunks
 INSERT INTO cluster_test VALUES ('2017-01-20T09:00:01', 23.4, 1),
        ('2017-01-21T09:00:01', 21.3, 2);
@@ -297,13 +300,10 @@ $$);
 
 SELECT * FROM toast_test;
 
-CLUSTER VERBOSE toast_test USING toast_test_time_idx;
-SELECT * FROM toast_test;
-
 -- force CLUSTER to vaccum the toast_table
 ALTER TABLE toast_test DROP COLUMN value;
 SELECT * FROM toast_test;
-CLUSTER VERBOSE toast_test USING cluster_test_time_idx;
+CLUSTER VERBOSE toast_test USING toast_test_time_idx;
 SELECT * FROM toast_test;
 
 -- after each test we ensure bitmap scans work
@@ -333,8 +333,10 @@ BEGIN;
     SELECT * FROM toast_test WHERE time='2004-10-19 10:23:54';
 COMMIT;
 
--- if we someone elses index error
+-- if we use someone elses index error
+\set ON_ERROR_STOP 0
 CLUSTER VERBOSE toast_test USING cluster_test_time_idx;
+\set ON_ERROR_STOP 1
 
 --check the setting of cluster indexes on hypertables and chunks
 ALTER TABLE cluster_test CLUSTER ON cluster_test_time_idx;
