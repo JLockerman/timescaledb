@@ -7,6 +7,8 @@
  *	  Intercept cluster command to only block concurrent writes instead of
  *    blocking both reads and writes as postgres does
  *
+ * This file is _not_ licensed Apache.
+ *
  *-------------------------------------------------------------------------
  */
 

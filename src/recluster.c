@@ -6,6 +6,8 @@
  * Based on an edited version of src/backend/commands/cluster.c from
  * postgresql-10.4 ab5e9caa4a3ec4765348a0482e88edcf3f6aab4a
  *
+ * This file is _not_ licensed Apache.
+ *
  * original copyright:
  *
  * Portions Copyright (c) 1996-2017, PostgreSQL Global Development Group
