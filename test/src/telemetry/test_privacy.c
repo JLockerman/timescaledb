@@ -8,10 +8,10 @@
 #include "telemetry/telemetry.h"
 #include "telemetry/uuid.h"
 
-TS_FUNCTION_INFO_V1(test_privacy);
+TS_FUNCTION_INFO_V1(ts_test_privacy);
 
 Datum
-test_privacy(PG_FUNCTION_ARGS)
+ts_test_privacy(PG_FUNCTION_ARGS)
 {
 	telemetry_main();
 	PG_RETURN_NULL();

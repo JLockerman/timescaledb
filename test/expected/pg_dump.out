@@ -46,7 +46,7 @@ BEGIN
 END
 $BODY$;
 -- Test that a custom chunk sizing function is restored
-CREATE OR REPLACE FUNCTION custom_calculate_chunk_interval(
+CREATE OR REPLACE FUNCTION custom_ts_calculate_chunk_interval(
         dimension_id INTEGER,
         dimension_coord BIGINT,
         chunk_target_size BIGINT
@@ -58,25 +58,25 @@ BEGIN
     RETURN -1;
 END
 $BODY$;
-SELECT * FROM set_adaptive_chunking('"test_schema"."two_Partitions"', '1 MB', 'custom_calculate_chunk_interval');
+SELECT * FROM set_adaptive_chunking('"test_schema"."two_Partitions"', '1 MB', 'custom_ts_calculate_chunk_interval');
 WARNING:  target chunk size for adaptive chunking is less than 10 MB
-        chunk_sizing_func        | chunk_target_size 
----------------------------------+-------------------
- custom_calculate_chunk_interval |           1048576
+         chunk_sizing_func          | chunk_target_size 
+------------------------------------+-------------------
+ custom_ts_calculate_chunk_interval |           1048576
 (1 row)
 
 -- Chunk sizing func set
 SELECT * FROM _timescaledb_catalog.hypertable;
- id | schema_name |   table_name   | associated_schema_name | associated_table_prefix | num_dimensions | chunk_sizing_func_schema |     chunk_sizing_func_name      | chunk_target_size 
-----+-------------+----------------+------------------------+-------------------------+----------------+--------------------------+---------------------------------+-------------------
-  1 | test_schema | two_Partitions | _timescaledb_internal  | _hyper_1                |              2 | public                   | custom_calculate_chunk_interval |           1048576
+ id | schema_name |   table_name   | associated_schema_name | associated_table_prefix | num_dimensions | chunk_sizing_func_schema |       chunk_sizing_func_name       | chunk_target_size 
+----+-------------+----------------+------------------------+-------------------------+----------------+--------------------------+------------------------------------+-------------------
+  1 | test_schema | two_Partitions | _timescaledb_internal  | _hyper_1                |              2 | public                   | custom_ts_calculate_chunk_interval |           1048576
 (1 row)
 
 SELECT proname, pronamespace, pronargs
-FROM pg_proc WHERE proname = 'custom_calculate_chunk_interval';
-             proname             | pronamespace | pronargs 
----------------------------------+--------------+----------
- custom_calculate_chunk_interval |         2200 |        3
+FROM pg_proc WHERE proname = 'custom_ts_calculate_chunk_interval';
+              proname               | pronamespace | pronargs 
+------------------------------------+--------------+----------
+ custom_ts_calculate_chunk_interval |         2200 |        3
 (1 row)
 
 CREATE TRIGGER restore_trigger BEFORE INSERT ON "test_schema"."two_Partitions"
@@ -454,16 +454,16 @@ SELECT * FROM _timescaledb_catalog.chunk_constraint;
 
 --Chunk sizing function should have been restored
 SELECT * FROM _timescaledb_catalog.hypertable;
- id | schema_name |   table_name   | associated_schema_name | associated_table_prefix | num_dimensions | chunk_sizing_func_schema |     chunk_sizing_func_name      | chunk_target_size 
-----+-------------+----------------+------------------------+-------------------------+----------------+--------------------------+---------------------------------+-------------------
-  1 | test_schema | two_Partitions | _timescaledb_internal  | _hyper_1                |              2 | public                   | custom_calculate_chunk_interval |           1048576
+ id | schema_name |   table_name   | associated_schema_name | associated_table_prefix | num_dimensions | chunk_sizing_func_schema |       chunk_sizing_func_name       | chunk_target_size 
+----+-------------+----------------+------------------------+-------------------------+----------------+--------------------------+------------------------------------+-------------------
+  1 | test_schema | two_Partitions | _timescaledb_internal  | _hyper_1                |              2 | public                   | custom_ts_calculate_chunk_interval |           1048576
 (1 row)
 
 SELECT proname, pronamespace, pronargs
-FROM pg_proc WHERE proname = 'custom_calculate_chunk_interval';
-             proname             | pronamespace | pronargs 
----------------------------------+--------------+----------
- custom_calculate_chunk_interval |         2200 |        3
+FROM pg_proc WHERE proname = 'custom_ts_calculate_chunk_interval';
+              proname               | pronamespace | pronargs 
+------------------------------------+--------------+----------
+ custom_ts_calculate_chunk_interval |         2200 |        3
 (1 row)
 
 --check simple ddl still works

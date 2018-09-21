@@ -21,7 +21,7 @@ END
 $BODY$;
 
 -- Test that a custom chunk sizing function is restored
-CREATE OR REPLACE FUNCTION custom_calculate_chunk_interval(
+CREATE OR REPLACE FUNCTION custom_ts_calculate_chunk_interval(
         dimension_id INTEGER,
         dimension_coord BIGINT,
         chunk_target_size BIGINT
@@ -34,12 +34,12 @@ BEGIN
 END
 $BODY$;
 
-SELECT * FROM set_adaptive_chunking('"test_schema"."two_Partitions"', '1 MB', 'custom_calculate_chunk_interval');
+SELECT * FROM set_adaptive_chunking('"test_schema"."two_Partitions"', '1 MB', 'custom_ts_calculate_chunk_interval');
 
 -- Chunk sizing func set
 SELECT * FROM _timescaledb_catalog.hypertable;
 SELECT proname, pronamespace, pronargs
-FROM pg_proc WHERE proname = 'custom_calculate_chunk_interval';
+FROM pg_proc WHERE proname = 'custom_ts_calculate_chunk_interval';
 
 CREATE TRIGGER restore_trigger BEFORE INSERT ON "test_schema"."two_Partitions"
 
@@ -119,7 +119,7 @@ SELECT * FROM _timescaledb_catalog.chunk_constraint;
 --Chunk sizing function should have been restored
 SELECT * FROM _timescaledb_catalog.hypertable;
 SELECT proname, pronamespace, pronargs
-FROM pg_proc WHERE proname = 'custom_calculate_chunk_interval';
+FROM pg_proc WHERE proname = 'custom_ts_calculate_chunk_interval';
 
 --check simple ddl still works
 ALTER TABLE "test_schema"."two_Partitions" ADD COLUMN series_3 integer;

@@ -1,5 +1,5 @@
 -- Valid chunk sizing function for testing
-CREATE OR REPLACE FUNCTION calculate_chunk_interval(
+CREATE OR REPLACE FUNCTION ts_calculate_chunk_interval(
         dimension_id INTEGER,
         dimension_coord BIGINT,
         chunk_target_size BIGINT
@@ -13,7 +13,7 @@ END
 $BODY$;
 
 -- Chunk sizing function with bad signature
-CREATE OR REPLACE FUNCTION bad_calculate_chunk_interval(
+CREATE OR REPLACE FUNCTION bad_ts_calculate_chunk_interval(
         dimension_id INTEGER
 )
     RETURNS BIGINT LANGUAGE PLPGSQL AS
@@ -34,13 +34,13 @@ CREATE TABLE test_adaptive(time timestamptz, temp float, location int);
 -- Bad signature of sizing func should fail
 SELECT create_hypertable('test_adaptive', 'time',
                          chunk_target_size => '1MB',
-                         chunk_sizing_func => 'bad_calculate_chunk_interval');
+                         chunk_sizing_func => 'bad_ts_calculate_chunk_interval');
 \set ON_ERROR_STOP 1
 
 -- Setting sizing func with correct signature should work
 SELECT create_hypertable('test_adaptive', 'time',
                          chunk_target_size => '1MB',
-                         chunk_sizing_func => 'calculate_chunk_interval');
+                         chunk_sizing_func => 'ts_calculate_chunk_interval');
 
 DROP TABLE test_adaptive;
 CREATE TABLE test_adaptive(time timestamptz, temp float, location int);
