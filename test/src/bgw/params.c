@@ -185,27 +185,21 @@ params_set_mock_wait_returns_immediately(bool new_val)
 	params_close_wrapper(wrapper);
 }
 
-TS_FUNCTION_INFO_V1(ts_bgw_params_reset_time);
-Datum
-ts_bgw_params_reset_time(PG_FUNCTION_ARGS)
+TS_FUNCTION(bgw_params_reset_time)
 {
 	params_set_time(0);
 
 	PG_RETURN_VOID();
 }
 
-TS_FUNCTION_INFO_V1(ts_bgw_params_mock_wait_returns_immediately);
-Datum
-ts_bgw_params_mock_wait_returns_immediately(PG_FUNCTION_ARGS)
+TS_FUNCTION(bgw_params_mock_wait_returns_immediately)
 {
 	params_set_mock_wait_returns_immediately(PG_GETARG_BOOL(0));
 
 	PG_RETURN_VOID();
 }
 
-TS_FUNCTION_INFO_V1(ts_bgw_params_create);
-Datum
-ts_bgw_params_create(PG_FUNCTION_ARGS)
+TS_FUNCTION(bgw_params_create)
 {
 	dsm_segment *seg = dsm_create(sizeof(TestParamsWrapper), 0);
 	TestParamsWrapper *params;
@@ -230,9 +224,7 @@ ts_bgw_params_create(PG_FUNCTION_ARGS)
 	PG_RETURN_VOID();
 }
 
-TS_FUNCTION_INFO_V1(ts_bgw_params_destroy);
-Datum
-ts_bgw_params_destroy(PG_FUNCTION_ARGS)
+TS_FUNCTION(bgw_params_destroy)
 {
 /* no way to unpin in 9.6 and can fail in EXEC_BACKEND cases so forget it, should only affect tests anyway */
 

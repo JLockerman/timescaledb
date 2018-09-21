@@ -30,8 +30,38 @@
 #endif							/* __GNUC__ */
 #endif
 
-#define TS_FUNCTION_INFO_V1(fn) \
-	PGDLLEXPORT Datum fn(PG_FUNCTION_ARGS); \
-	PG_FUNCTION_INFO_V1(fn)
+#define TS_PREFIX(fn) \
+	TS_CAT(ts_, fn)
+
+/*
+ * Functions exposed to postgres always have the signature
+ *   `PGDLLEXPORT Datum function(PG_FUNCTION_ARGS)`
+ * and function name should always be of the form `ts_realname`
+ * We define the following macros `TS_FUNCTION` and `TS_FUNCTION_HEADER` to
+ * assist with this:
+ *
+ * C files:
+ *
+ *    extern TS_FUNCTION(realname)
+ *    {
+ *    	// body
+ *    }
+ *
+ * Header files:
+ *
+ *    extern TS_FUNCTION_HEADER(realname);
+ *
+ */
+#define TS_FUNCTION_HEADER(fn) \
+	PGDLLEXPORT Datum TS_PREFIX(fn)(PG_FUNCTION_ARGS)
+
+/*
+ * NOTE: this macro needs both calls to TS_FUNCTION, the first one sets up a
+ * prototype which is used in PG_FUNCTION_INFO_V1
+ */
+#define TS_FUNCTION(fn) \
+	TS_FUNCTION_HEADER(fn); \
+	PG_FUNCTION_INFO_V1(TS_PREFIX(fn)); \
+	TS_FUNCTION_HEADER(fn)
 
 #endif							/* TIMESCALEDB_EXPORT_H */

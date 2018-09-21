@@ -454,10 +454,8 @@ tablespace_delete_from_all(const char *tspcname, Oid userid)
 	return num_deleted;
 }
 
-TS_FUNCTION_INFO_V1(tablespace_attach);
 
-Datum
-tablespace_attach(PG_FUNCTION_ARGS)
+TS_FUNCTION(tablespace_attach)
 {
 	Name		tspcname = PG_ARGISNULL(0) ? NULL : PG_GETARG_NAME(0);
 	Oid			hypertable_oid = PG_ARGISNULL(1) ? InvalidOid : PG_GETARG_OID(1);
@@ -466,13 +464,13 @@ tablespace_attach(PG_FUNCTION_ARGS)
 	if (PG_NARGS() < 2 || PG_NARGS() > 3)
 		elog(ERROR, "invalid number of arguments");
 
-	tablespace_attach_internal(tspcname, hypertable_oid, if_not_attached);
+	ts_tablespace_attach_internal(tspcname, hypertable_oid, if_not_attached);
 
 	PG_RETURN_VOID();
 }
 
 void
-tablespace_attach_internal(Name tspcname, Oid hypertable_oid, bool if_not_attached)
+ts_tablespace_attach_internal(Name tspcname, Oid hypertable_oid, bool if_not_attached)
 {
 	Cache	   *hcache;
 	Hypertable *ht;
@@ -544,7 +542,7 @@ tablespace_attach_internal(Name tspcname, Oid hypertable_oid, bool if_not_attach
 }
 
 static int
-tablespace_detach_one(Oid hypertable_oid, const char *tspcname, Oid tspcoid, bool if_attached)
+ts_tablespace_detach_one(Oid hypertable_oid, const char *tspcname, Oid tspcoid, bool if_attached)
 {
 	Cache	   *hcache;
 	Hypertable *ht;
@@ -580,7 +578,7 @@ tablespace_detach_one(Oid hypertable_oid, const char *tspcname, Oid tspcoid, boo
 }
 
 static int
-tablespace_detach_all(Oid hypertable_oid)
+ts_tablespace_detach_all(Oid hypertable_oid)
 {
 	Cache	   *hcache;
 	Hypertable *ht;
@@ -604,10 +602,8 @@ tablespace_detach_all(Oid hypertable_oid)
 	return ret;
 }
 
-TS_FUNCTION_INFO_V1(tablespace_detach);
 
-Datum
-tablespace_detach(PG_FUNCTION_ARGS)
+TS_FUNCTION(tablespace_detach)
 {
 	Name		tspcname = PG_ARGISNULL(0) ? NULL : PG_GETARG_NAME(0);
 	Oid			hypertable_oid = PG_ARGISNULL(1) ? InvalidOid : PG_GETARG_OID(1);
@@ -637,17 +633,15 @@ tablespace_detach(PG_FUNCTION_ARGS)
 						NameStr(*tspcname))));
 
 	if (OidIsValid(hypertable_oid))
-		ret = tablespace_detach_one(hypertable_oid, NameStr(*tspcname), tspcoid, if_attached);
+		ret = ts_tablespace_detach_one(hypertable_oid, NameStr(*tspcname), tspcoid, if_attached);
 	else
 		ret = tablespace_delete_from_all(NameStr(*tspcname), GetUserId());
 
 	PG_RETURN_INT32(ret);
 }
 
-TS_FUNCTION_INFO_V1(tablespace_detach_all_from_hypertable);
 
-Datum
-tablespace_detach_all_from_hypertable(PG_FUNCTION_ARGS)
+TS_FUNCTION(tablespace_detach_all_from_hypertable)
 {
 	if (PG_NARGS() != 1)
 		elog(ERROR, "invalid number of arguments");
@@ -655,13 +649,11 @@ tablespace_detach_all_from_hypertable(PG_FUNCTION_ARGS)
 	if (PG_ARGISNULL(0))
 		elog(ERROR, "invalid argument");
 
-	PG_RETURN_INT32(tablespace_detach_all(PG_GETARG_OID(0)));
+	PG_RETURN_INT32(ts_tablespace_detach_all(PG_GETARG_OID(0)));
 }
 
-TS_FUNCTION_INFO_V1(tablespace_show);
 
-Datum
-tablespace_show(PG_FUNCTION_ARGS)
+TS_FUNCTION(tablespace_show)
 {
 	FuncCallContext *funcctx;
 	Oid			hypertable_oid = PG_ARGISNULL(0) ? InvalidOid : PG_GETARG_OID(0);

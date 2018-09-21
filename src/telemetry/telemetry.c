@@ -345,10 +345,8 @@ cleanup:
 	return;
 }
 
-TS_FUNCTION_INFO_V1(ts_get_telemetry_report);
 
-Datum
-ts_get_telemetry_report(PG_FUNCTION_ARGS)
+TS_FUNCTION(get_telemetry_report)
 {
 	StringInfo	request = build_version_body();
 

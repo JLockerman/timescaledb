@@ -50,10 +50,8 @@ uuid_create(void)
 	return (pg_uuid_t *) gen_uuid;
 }
 
-TS_FUNCTION_INFO_V1(ts_uuid_generate);
 
-Datum
-ts_uuid_generate(PG_FUNCTION_ARGS)
+TS_FUNCTION(uuid_generate)
 {
 	return UUIDPGetDatum(uuid_create());
 }

@@ -79,10 +79,8 @@ hypertable_cache_invalidate_callback(void)
 {
 }
 
-TS_FUNCTION_INFO_V1(mock_function);
 
-Datum
-mock_function(PG_FUNCTION_ARGS)
+TS_FUNCTION(mock_function)
 {
 	elog(WARNING, "mock function call " STR(TIMESCALEDB_VERSION_MOD));
 	PG_RETURN_VOID();

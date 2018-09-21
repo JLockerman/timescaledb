@@ -2166,13 +2166,11 @@ process_ddl_event_command_end(EventTriggerData *trigdata)
 	EventTriggerUndoInhibitCommandCollection();
 }
 
-TS_FUNCTION_INFO_V1(timescaledb_process_ddl_event);
 /*
  * Event trigger hook for DDL commands that have alread been handled by
  * PostgreSQL (i.e., "ddl_command_end" and "sql_drop" events).
  */
-Datum
-timescaledb_process_ddl_event(PG_FUNCTION_ARGS)
+TS_FUNCTION(timescaledb_process_ddl_event)
 {
 	EventTriggerData *trigdata = (EventTriggerData *) fcinfo->context;
 	ListCell   *lc;

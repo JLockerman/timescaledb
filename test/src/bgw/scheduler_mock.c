@@ -25,11 +25,6 @@
 #include "params.h"
 
 
-TS_FUNCTION_INFO_V1(ts_bgw_db_scheduler_test_run_and_wait_for_scheduler_finish);
-TS_FUNCTION_INFO_V1(ts_bgw_db_scheduler_test_run);
-TS_FUNCTION_INFO_V1(ts_bgw_db_scheduler_test_wait_for_scheduler_finish);
-TS_FUNCTION_INFO_V1(ts_bgw_db_scheduler_test_main);
-TS_FUNCTION_INFO_V1(ts_bgw_job_execute_test);
 
 typedef enum TestJobType
 {
@@ -83,8 +78,8 @@ deserialize_test_parameters(char *params, int32 *ttl)
 	*ttl = DatumGetInt32(DirectFunctionCall1(numeric_int4, NumericGetDatum(ttl_numeric)));
 }
 
-extern Datum
-ts_bgw_db_scheduler_test_main(PG_FUNCTION_ARGS)
+extern
+TS_FUNCTION(bgw_db_scheduler_test_main)
 {
 	Oid			db_oid = DatumGetObjectId(MyBgworkerEntry->bgw_main_arg);
 	int32		ttl;
@@ -117,8 +112,8 @@ ts_bgw_db_scheduler_test_main(PG_FUNCTION_ARGS)
 	PG_RETURN_VOID();
 }
 
-extern Datum
-ts_bgw_db_scheduler_test_run_and_wait_for_scheduler_finish(PG_FUNCTION_ARGS)
+extern
+TS_FUNCTION(bgw_db_scheduler_test_run_and_wait_for_scheduler_finish)
 {
 	char	   *params = serialize_test_parameters(PG_GETARG_INT32(0));
 	BackgroundWorkerHandle *worker_handle;
@@ -134,8 +129,8 @@ ts_bgw_db_scheduler_test_run_and_wait_for_scheduler_finish(PG_FUNCTION_ARGS)
 
 static BackgroundWorkerHandle *current_handle = NULL;
 
-extern Datum
-ts_bgw_db_scheduler_test_run(PG_FUNCTION_ARGS)
+extern
+TS_FUNCTION(bgw_db_scheduler_test_run)
 {
 	char	   *params = serialize_test_parameters(PG_GETARG_INT32(0));
 	pid_t		pid;
@@ -151,8 +146,8 @@ ts_bgw_db_scheduler_test_run(PG_FUNCTION_ARGS)
 	PG_RETURN_VOID();
 }
 
-extern Datum
-ts_bgw_db_scheduler_test_wait_for_scheduler_finish(PG_FUNCTION_ARGS)
+extern
+TS_FUNCTION(bgw_db_scheduler_test_wait_for_scheduler_finish)
 {
 	Assert(BGWH_STOPPED == WaitForBackgroundWorkerShutdown(current_handle));
 	PG_RETURN_VOID();
@@ -251,8 +246,7 @@ test_job_dispatcher(BgwJob *job)
 	return false;
 }
 
-Datum
-ts_bgw_job_execute_test(PG_FUNCTION_ARGS)
+TS_FUNCTION(bgw_job_execute_test)
 {
 	timer_set(&mock_timer);
 	bgw_job_set_unknown_job_type_hook(test_job_dispatcher);

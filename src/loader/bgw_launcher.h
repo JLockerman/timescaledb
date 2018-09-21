@@ -8,8 +8,8 @@
 extern void bgw_cluster_launcher_register(void);
 
 /*called by postmaster at launcher bgw startup*/
-PGDLLEXPORT extern Datum ts_bgw_cluster_launcher_main(PG_FUNCTION_ARGS);
-PGDLLEXPORT extern Datum ts_bgw_db_scheduler_entrypoint(PG_FUNCTION_ARGS);
+extern TS_FUNCTION_HEADER(bgw_cluster_launcher_main);
+extern TS_FUNCTION_HEADER(bgw_db_scheduler_entrypoint);
 
 
 

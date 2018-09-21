@@ -69,8 +69,6 @@ typedef enum AckResult
  * shared_preload_libraries time.
  */
 
-TS_FUNCTION_INFO_V1(ts_bgw_cluster_launcher_main);
-TS_FUNCTION_INFO_V1(ts_bgw_db_scheduler_entrypoint);
 typedef struct DbHashEntry
 {
 	Oid			db_oid;			/* key for the hash table, must be first */
@@ -620,8 +618,8 @@ launcher_sigterm(SIGNAL_ARGS)
 	die(postgres_signal_arg);
 }
 
-extern Datum
-ts_bgw_cluster_launcher_main(PG_FUNCTION_ARGS)
+extern
+TS_FUNCTION(bgw_cluster_launcher_main)
 {
 
 	HTAB	   *db_htab;
@@ -724,8 +722,8 @@ database_is_template_check(void)
  * worker using whatever version is now installed (or exit gracefully if
  * no version is now installed).
  */
-extern Datum
-ts_bgw_db_scheduler_entrypoint(PG_FUNCTION_ARGS)
+extern
+TS_FUNCTION(bgw_db_scheduler_entrypoint)
 {
 	Oid			db_id = DatumGetObjectId(MyBgworkerEntry->bgw_main_arg);
 	bool		ts_installed = false;

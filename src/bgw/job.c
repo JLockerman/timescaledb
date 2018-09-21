@@ -10,6 +10,7 @@
 
 #include "job.h"
 #include "scanner.h"
+#include "export.h"
 #include "extension.h"
 #include "compat.h"
 #include "job_stat.h"
@@ -235,10 +236,9 @@ handle_sigterm(SIGNAL_ARGS)
 }
 
 
-TS_FUNCTION_INFO_V1(ts_bgw_job_entrypoint);
 
-extern Datum
-ts_bgw_job_entrypoint(PG_FUNCTION_ARGS)
+extern
+TS_FUNCTION(bgw_job_entrypoint)
 {
 	Oid			db_oid = DatumGetObjectId(MyBgworkerEntry->bgw_main_arg);
 	int32		job_id = Int32GetDatum(DirectFunctionCall1(int4in, CStringGetDatum(MyBgworkerEntry->bgw_extra)));

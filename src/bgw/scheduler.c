@@ -39,7 +39,6 @@
 #define LEAST_TIMESTAMP(left, right) \
 	(left < right ? left : right)
 
-TS_FUNCTION_INFO_V1(ts_bgw_scheduler_main);
 
 
 /* has to be global to shutdown jobs on exit */
@@ -530,8 +529,7 @@ handle_sigterm(SIGNAL_ARGS)
 	die(postgres_signal_arg);
 }
 
-Datum
-ts_bgw_scheduler_main(PG_FUNCTION_ARGS)
+TS_FUNCTION(bgw_scheduler_main)
 {
 	BackgroundWorkerBlockSignals();
 	/* Setup any signal handlers here */

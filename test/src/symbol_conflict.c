@@ -19,10 +19,11 @@ test_symbol_conflict(void)
 	return "hello from " STR(MODULE_NAME);
 }
 
-TS_FUNCTION_INFO_V1(FUNC(MODULE_NAME, hello));
+
+Datum TS_PREFIX(FUNC(MODULE_NAME, hello)) (PG_FUNCTION_ARGS);
 
 Datum
-FUNC(MODULE_NAME, hello) (PG_FUNCTION_ARGS)
+TS_PREFIX(FUNC(MODULE_NAME, hello)) (PG_FUNCTION_ARGS)
 {
 	PG_RETURN_TEXT_P(cstring_to_text(test_symbol_conflict()));
 }
