@@ -213,13 +213,13 @@ calculate_open_range_default(Dimension *dim, int64 value)
 	return dimension_slice_create(dim->fd.id, range_start, range_end);
 }
 
-TS_FUNCTION_INFO_V1(dimension_calculate_open_range_default);
+TS_FUNCTION_INFO_V1(ts_dimension_calculate_open_range_default);
 
 /*
  * Expose open dimension range calculation for testing purposes.
  */
 Datum
-dimension_calculate_open_range_default(PG_FUNCTION_ARGS)
+ts_dimension_calculate_open_range_default(PG_FUNCTION_ARGS)
 {
 	int64		value = PG_GETARG_INT64(0);
 	Dimension	dim = {
@@ -264,13 +264,13 @@ calculate_closed_range_default(Dimension *dim, int64 value)
 	return dimension_slice_create(dim->fd.id, range_start, range_end);
 }
 
-TS_FUNCTION_INFO_V1(dimension_calculate_closed_range_default);
+TS_FUNCTION_INFO_V1(ts_dimension_calculate_closed_range_default);
 
 /*
  * Exposed closed dimension range calculation for testing purposes.
  */
 Datum
-dimension_calculate_closed_range_default(PG_FUNCTION_ARGS)
+ts_dimension_calculate_closed_range_default(PG_FUNCTION_ARGS)
 {
 	int64		value = PG_GETARG_INT64(0);
 	Dimension	dim = {
@@ -740,13 +740,13 @@ dimension_interval_to_internal(const char *colname,
 	return interval;
 }
 
-TS_FUNCTION_INFO_V1(dimension_interval_to_internal_test);
+TS_FUNCTION_INFO_V1(ts_dimension_interval_to_internal_test);
 
 /*
  * Exposed for testing purposes.
  */
 Datum
-dimension_interval_to_internal_test(PG_FUNCTION_ARGS)
+ts_dimension_interval_to_internal_test(PG_FUNCTION_ARGS)
 {
 	Oid			coltype = PG_GETARG_OID(0);
 	Datum		value = PG_GETARG_DATUM(1);
@@ -756,7 +756,7 @@ dimension_interval_to_internal_test(PG_FUNCTION_ARGS)
 }
 
 static void
-dimension_add_not_null_on_column(Oid table_relid, char *colname)
+ts_dimension_add_not_null_on_column(Oid table_relid, char *colname)
 {
 	AlterTableCmd cmd = {
 		.type = T_AlterTableCmd,
@@ -839,10 +839,10 @@ dimension_update(FunctionCallInfo fcinfo,
 	cache_release(hcache);
 }
 
-TS_FUNCTION_INFO_V1(dimension_set_num_slices);
+TS_FUNCTION_INFO_V1(ts_dimension_set_num_slices);
 
 Datum
-dimension_set_num_slices(PG_FUNCTION_ARGS)
+ts_dimension_set_num_slices(PG_FUNCTION_ARGS)
 {
 	Oid			table_relid = PG_GETARG_OID(0);
 	int32		num_slices_arg = PG_ARGISNULL(1) ? -1 : PG_GETARG_INT32(1);
@@ -869,10 +869,10 @@ dimension_set_num_slices(PG_FUNCTION_ARGS)
 	PG_RETURN_VOID();
 }
 
-TS_FUNCTION_INFO_V1(dimension_set_interval);
+TS_FUNCTION_INFO_V1(ts_dimension_set_interval);
 
 Datum
-dimension_set_interval(PG_FUNCTION_ARGS)
+ts_dimension_set_interval(PG_FUNCTION_ARGS)
 {
 	Oid			table_relid = PG_GETARG_OID(0);
 	Datum		interval = PG_GETARG_DATUM(1);
@@ -988,10 +988,10 @@ dimension_validate_info(DimensionInfo *info)
 }
 
 void
-dimension_add_from_info(DimensionInfo *info)
+ts_dimension_add_from_info(DimensionInfo *info)
 {
 	if (info->set_not_null)
-		dimension_add_not_null_on_column(info->table_relid, NameStr(*info->colname));
+		ts_dimension_add_not_null_on_column(info->table_relid, NameStr(*info->colname));
 
 	Assert(info->ht != NULL);
 
@@ -999,7 +999,7 @@ dimension_add_from_info(DimensionInfo *info)
 					 info->num_slices, info->partitioning_func, info->interval);
 }
 
-TS_FUNCTION_INFO_V1(dimension_add);
+TS_FUNCTION_INFO_V1(ts_dimension_add);
 
 /*
  * Add a new dimension to a hypertable.
@@ -1013,7 +1013,7 @@ TS_FUNCTION_INFO_V1(dimension_add);
  * 5. IF NOT EXISTS option (bool)
  */
 Datum
-dimension_add(PG_FUNCTION_ARGS)
+ts_dimension_add(PG_FUNCTION_ARGS)
 {
 	Cache	   *hcache = hypertable_cache_pin();
 	DimensionInfo info = {
@@ -1072,7 +1072,7 @@ dimension_add(PG_FUNCTION_ARGS)
 		 * table.
 		 */
 		hypertable_set_num_dimensions(info.ht, info.ht->space->num_dimensions + 1);
-		dimension_add_from_info(&info);
+		ts_dimension_add_from_info(&info);
 
 		/* Verify that existing indexes are compatible with a hypertable */
 

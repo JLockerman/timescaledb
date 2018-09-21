@@ -948,7 +948,7 @@ hypertable_has_tuples(Oid table_relid, LOCKMODE lockmode)
 }
 
 static void
-hypertable_create_schema(const char *schema_name)
+ts_hypertable_create_schema(const char *schema_name)
 {
 	CreateSchemaStmt stmt = {
 		.schemaname = (char *) schema_name,
@@ -1035,10 +1035,10 @@ hypertable_validate_constraints(Oid relid)
  *   included in a pg_dump. We also add logic to make sure this trigger is not
  *   propagated to chunks.
  */
-TS_FUNCTION_INFO_V1(hypertable_insert_blocker);
+TS_FUNCTION_INFO_V1(ts_hypertable_insert_blocker);
 
 Datum
-hypertable_insert_blocker(PG_FUNCTION_ARGS)
+ts_hypertable_insert_blocker(PG_FUNCTION_ARGS)
 {
 	TriggerData *trigdata = (TriggerData *) fcinfo->context;
 	const char *relname = get_rel_name(trigdata->tg_relation->rd_id);
@@ -1141,7 +1141,7 @@ insert_blocker_trigger_add(Oid relid)
 	return objaddr.objectId;
 }
 
-TS_FUNCTION_INFO_V1(hypertable_insert_blocker_trigger_add);
+TS_FUNCTION_INFO_V1(ts_hypertable_insert_blocker_trigger_add);
 
 /*
  * This function is exposed to drop the old blocking trigger on legacy hypertables.
@@ -1152,7 +1152,7 @@ TS_FUNCTION_INFO_V1(hypertable_insert_blocker_trigger_add);
  * error instructing the user to fix the issue first.
  */
 Datum
-hypertable_insert_blocker_trigger_add(PG_FUNCTION_ARGS)
+ts_hypertable_insert_blocker_trigger_add(PG_FUNCTION_ARGS)
 {
 	Oid			relid = PG_GETARG_OID(0);
 	Oid			old_trigger;
@@ -1187,7 +1187,7 @@ hypertable_insert_blocker_trigger_add(PG_FUNCTION_ARGS)
 	PG_RETURN_OID(insert_blocker_trigger_add(relid));
 }
 
-TS_FUNCTION_INFO_V1(hypertable_create);
+TS_FUNCTION_INFO_V1(ts_hypertable_create);
 
 /*
  * Create a hypertable from an existing table.
@@ -1208,7 +1208,7 @@ TS_FUNCTION_INFO_V1(hypertable_create);
  * chunk_target_size       TEXT = NULL
  */
 Datum
-hypertable_create(PG_FUNCTION_ARGS)
+ts_hypertable_create(PG_FUNCTION_ARGS)
 {
 	Oid			table_relid = PG_GETARG_OID(0);
 	Name		associated_schema_name = PG_ARGISNULL(4) ? NULL : PG_GETARG_NAME(4);
@@ -1370,7 +1370,7 @@ hypertable_create(PG_FUNCTION_ARGS)
 
 	/* Create the associated schema if it doesn't already exist */
 	if (!OidIsValid(associated_schema_oid))
-		hypertable_create_schema(NameStr(*associated_schema_name));
+		ts_hypertable_create_schema(NameStr(*associated_schema_name));
 
 	/*
 	 * Hypertables do not support transition tables in triggers, so if the
@@ -1416,10 +1416,10 @@ hypertable_create(PG_FUNCTION_ARGS)
 	Assert(time_dim_info.ht != NULL);
 
 	/* Add validated dimensions */
-	dimension_add_from_info(&time_dim_info);
+	ts_dimension_add_from_info(&time_dim_info);
 
 	if (DIMENSION_INFO_IS_SET(&space_dim_info))
-		dimension_add_from_info(&space_dim_info);
+		ts_dimension_add_from_info(&space_dim_info);
 
 	/* Refresh the cache to get the updated hypertable with added dimensions */
 	cache_release(hcache);
@@ -1437,7 +1437,7 @@ hypertable_create(PG_FUNCTION_ARGS)
 		NameData	tspc_name;
 
 		namestrcpy(&tspc_name, get_tablespace_name(tspc_oid));
-		tablespace_attach_internal(&tspc_name, table_relid, false);
+		ts_tablespace_attach_internal(&tspc_name, table_relid, false);
 	}
 
 	/*
