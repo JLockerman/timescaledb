@@ -286,7 +286,7 @@ transcache_get(FunctionCallInfo fcinfo)
 }
 
 /*
- * bookend_sfunc - internal function called be last_sfunc and first_sfunc;
+ * bookend_sfunc - internal function called be ts_last_sfunc and ts_first_sfunc;
  */
 static inline Datum
 bookend_sfunc(MemoryContext aggcontext, InternalCmpAggStore *state, PolyDatum value, PolyDatum cmp, char *opname, FunctionCallInfo fcinfo)
@@ -319,7 +319,7 @@ bookend_sfunc(MemoryContext aggcontext, InternalCmpAggStore *state, PolyDatum va
 	PG_RETURN_POINTER(state);
 }
 
-/* bookend_combinefunc - internal function called be last_combinefunc and first_combinefunc;
+/* bookend_combinefunc - internal function called be ts_last_combinefunc and ts_first_combinefunc;
  * fmgr args are: (internal internal_state, internal2 internal_state)
  */
 static inline Datum
@@ -371,8 +371,7 @@ bookend_combinefunc(MemoryContext aggcontext, InternalCmpAggStore *state1, Inter
 }
 
 /* first(internal internal_state, anyelement value, "any" comparison_element) */
-Datum
-first_sfunc(PG_FUNCTION_ARGS)
+TS_FUNCTION(first_sfunc)
 {
 	InternalCmpAggStore *store = PG_ARGISNULL(0) ? NULL : (InternalCmpAggStore *) PG_GETARG_POINTER(0);
 	PolyDatum	value = polydatum_from_arg(1, fcinfo);
@@ -389,8 +388,7 @@ first_sfunc(PG_FUNCTION_ARGS)
 }
 
 /* last(internal internal_state, anyelement value, "any" comparison_element) */
-Datum
-last_sfunc(PG_FUNCTION_ARGS)
+TS_FUNCTION(last_sfunc)
 {
 	InternalCmpAggStore *store = PG_ARGISNULL(0) ? NULL : (InternalCmpAggStore *) PG_GETARG_POINTER(0);
 	PolyDatum	value = polydatum_from_arg(1, fcinfo);
@@ -407,8 +405,7 @@ last_sfunc(PG_FUNCTION_ARGS)
 }
 
 /* first_combinerfunc(internal, internal) => internal */
-Datum
-first_combinefunc(PG_FUNCTION_ARGS)
+TS_FUNCTION(first_combinefunc)
 {
 	MemoryContext aggcontext;
 	InternalCmpAggStore *state1 = PG_ARGISNULL(0) ? NULL : (InternalCmpAggStore *) PG_GETARG_POINTER(0);
@@ -417,14 +414,13 @@ first_combinefunc(PG_FUNCTION_ARGS)
 	if (!AggCheckCallContext(fcinfo, &aggcontext))
 	{
 		/* cannot be called directly because of internal-type argument */
-		elog(ERROR, "first_combinefunc called in non-aggregate context");
+		elog(ERROR, "ts_first_combinefunc called in non-aggregate context");
 	}
 	return bookend_combinefunc(aggcontext, state1, state2, "<", fcinfo);
 }
 
 /* last_combinerfunc(internal, internal) => internal */
-Datum
-last_combinefunc(PG_FUNCTION_ARGS)
+TS_FUNCTION(last_combinefunc)
 {
 	MemoryContext aggcontext;
 	InternalCmpAggStore *state1 = PG_ARGISNULL(0) ? NULL : (InternalCmpAggStore *) PG_GETARG_POINTER(0);
@@ -433,15 +429,14 @@ last_combinefunc(PG_FUNCTION_ARGS)
 	if (!AggCheckCallContext(fcinfo, &aggcontext))
 	{
 		/* cannot be called directly because of internal-type argument */
-		elog(ERROR, "last_combinefunc called in non-aggregate context");
+		elog(ERROR, "ts_last_combinefunc called in non-aggregate context");
 	}
 	return bookend_combinefunc(aggcontext, state1, state2, ">", fcinfo);
 }
 
 
-/* bookend_serializefunc(internal) => bytea */
-Datum
-bookend_serializefunc(PG_FUNCTION_ARGS)
+/* ts_bookend_serializefunc(internal) => bytea */
+TS_FUNCTION(bookend_serializefunc)
 {
 	StringInfoData buf;
 	InternalCmpAggStoreIOState *my_extra;
@@ -463,9 +458,8 @@ bookend_serializefunc(PG_FUNCTION_ARGS)
 	PG_RETURN_BYTEA_P(pq_endtypsend(&buf));
 }
 
-/* bookend_deserializefunc(bytea, internal) => internal */
-Datum
-bookend_deserializefunc(PG_FUNCTION_ARGS)
+/* ts_bookend_deserializefunc(bytea, internal) => internal */
+TS_FUNCTION(bookend_deserializefunc)
 {
 	bytea	   *sstate;
 	StringInfoData buf;
@@ -499,16 +493,15 @@ bookend_deserializefunc(PG_FUNCTION_ARGS)
 }
 
 
-/* bookend_finalfunc(internal, anyelement, "any") => anyelement */
-Datum
-bookend_finalfunc(PG_FUNCTION_ARGS)
+/* ts_bookend_finalfunc(internal, anyelement, "any") => anyelement */
+TS_FUNCTION(bookend_finalfunc)
 {
 	InternalCmpAggStore *state;
 
 	if (!AggCheckCallContext(fcinfo, NULL))
 	{
 		/* cannot be called directly because of internal-type argument */
-		elog(ERROR, "bookend_finalfunc called in non-aggregate context");
+		elog(ERROR, "ts_bookend_finalfunc called in non-aggregate context");
 	}
 
 

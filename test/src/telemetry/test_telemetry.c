@@ -92,8 +92,7 @@ test_factory(ConnectionType type, int status, char *host, int port)
 }
 
 /*  Test ssl_ops */
-Datum
-test_status_ssl(PG_FUNCTION_ARGS)
+TS_FUNCTION(test_status_ssl)
 {
 	int			status = PG_GETARG_INT32(0);
 #ifdef TS_USE_OPENSSL
@@ -112,8 +111,7 @@ test_status_ssl(PG_FUNCTION_ARGS)
 }
 
 /*  Test default_ops */
-Datum
-test_status(PG_FUNCTION_ARGS)
+TS_FUNCTION(test_status)
 {
 	int			port = 80;
 	int			status = PG_GETARG_INT32(0);
@@ -123,8 +121,7 @@ test_status(PG_FUNCTION_ARGS)
 
 #ifdef TS_DEBUG
 /* Test mock_ops */
-Datum
-test_status_mock(PG_FUNCTION_ARGS)
+TS_FUNCTION(test_status_mock)
 {
 	int			port = 80;
 	text	   *arg1 = PG_GETARG_TEXT_P(0);
@@ -137,8 +134,7 @@ test_status_mock(PG_FUNCTION_ARGS)
 
 TS_FUNCTION_INFO_V1(test_telemetry_parse_version);
 
-Datum
-test_telemetry_parse_version(PG_FUNCTION_ARGS)
+TS_FUNCTION(test_telemetry_parse_version)
 {
 	text	   *response = PG_GETARG_TEXT_P(0);
 	VersionInfo installed_version;
@@ -195,8 +191,7 @@ test_telemetry_parse_version(PG_FUNCTION_ARGS)
 }
 
 /* Try to get the telemetry function to handle errors. Never connect to the actual endpoint. Only test cases that will result in connection errors. */
-Datum
-test_telemetry_main_conn(PG_FUNCTION_ARGS)
+TS_FUNCTION(test_telemetry_main_conn)
 {
 	text	   *host = PG_GETARG_TEXT_P(0);
 	text	   *path = PG_GETARG_TEXT_P(1);
@@ -206,8 +201,7 @@ test_telemetry_main_conn(PG_FUNCTION_ARGS)
 	PG_RETURN_NULL();
 }
 
-Datum
-test_telemetry(PG_FUNCTION_ARGS)
+TS_FUNCTION(test_telemetry)
 {
 	Connection *conn;
 	ConnectionType conntype;

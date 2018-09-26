@@ -30,8 +30,7 @@ TS_FUNCTION_INFO_V1(hist_deserializefunc);
 TS_FUNCTION_INFO_V1(hist_finalfunc);
 
 /* histogram(state, val, min, max, nbuckets) */
-Datum
-hist_sfunc(PG_FUNCTION_ARGS)
+TS_FUNCTION(hist_sfunc)
 {
 	MemoryContext aggcontext;
 	bytea	   *state = (PG_ARGISNULL(0) ? NULL : PG_GETARG_BYTEA_P(0));
@@ -48,7 +47,7 @@ hist_sfunc(PG_FUNCTION_ARGS)
 	if (!AggCheckCallContext(fcinfo, &aggcontext))
 	{
 		/* cannot be called directly because of internal-type argument */
-		elog(ERROR, "hist_sfunc called in non-aggregate context");
+		elog(ERROR, "ts_hist_sfunc called in non-aggregate context");
 	}
 
 	if (min > max)
@@ -87,9 +86,8 @@ copy_state(MemoryContext aggcontext, bytea *state)
 	return copy;
 }
 
-/* hist_combinefunc(internal, internal) => internal */
-Datum
-hist_combinefunc(PG_FUNCTION_ARGS)
+/* ts_hist_combinefunc(internal, internal) => internal */
+TS_FUNCTION(hist_combinefunc)
 {
 	MemoryContext aggcontext;
 
@@ -100,7 +98,7 @@ hist_combinefunc(PG_FUNCTION_ARGS)
 	if (!AggCheckCallContext(fcinfo, &aggcontext))
 	{
 		/* cannot be called directly because of internal-type argument */
-		elog(ERROR, "hist_combinefunc called in non-aggregate context");
+		elog(ERROR, "ts_hist_combinefunc called in non-aggregate context");
 	}
 
 	if (state2 == NULL)
@@ -131,9 +129,8 @@ hist_combinefunc(PG_FUNCTION_ARGS)
 	PG_RETURN_BYTEA_P(result);
 }
 
-/* hist_serializefunc(internal) => bytea */
-Datum
-hist_serializefunc(PG_FUNCTION_ARGS)
+/* ts_hist_serializefunc(internal) => bytea */
+TS_FUNCTION(hist_serializefunc)
 {
 	bytea	   *state;
 	Datum	   *hist;
@@ -151,9 +148,8 @@ hist_serializefunc(PG_FUNCTION_ARGS)
 	PG_RETURN_BYTEA_P(state);
 }
 
-/* hist_deserializefunc(bytea, internal) => internal */
-Datum
-hist_deserializefunc(PG_FUNCTION_ARGS)
+/* ts_hist_deserializefunc(bytea, internal) => internal */
+TS_FUNCTION(hist_deserializefunc)
 {
 	bytea	   *state;
 	Datum	   *hist;
@@ -172,8 +168,7 @@ hist_deserializefunc(PG_FUNCTION_ARGS)
 }
 
 /* hist_funalfunc(internal, val REAL, MIN REAL, MAX REAL, nbuckets INTEGER) => INTEGER[] */
-Datum
-hist_finalfunc(PG_FUNCTION_ARGS)
+TS_FUNCTION(hist_finalfunc)
 {
 	bytea	   *state;
 	Datum	   *hist;
@@ -183,7 +178,7 @@ hist_finalfunc(PG_FUNCTION_ARGS)
 	if (!AggCheckCallContext(fcinfo, NULL))
 	{
 		/* cannot be called directly because of internal-type argument */
-		elog(ERROR, "hist_finalfunc called in non-aggregate context");
+		elog(ERROR, "ts_hist_finalfunc called in non-aggregate context");
 	}
 
 	if (PG_ARGISNULL(0))

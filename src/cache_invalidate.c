@@ -83,8 +83,7 @@ TS_FUNCTION_INFO_V1(timescaledb_invalidate_cache);
  * The first argument should be the catalog table that has changed, warranting a
  * cache invalidation.
  */
-Datum
-timescaledb_invalidate_cache(PG_FUNCTION_ARGS)
+TS_FUNCTION(timescaledb_invalidate_cache)
 {
 	catalog_invalidate_cache(PG_GETARG_OID(0), CMD_UPDATE);
 	PG_RETURN_VOID();

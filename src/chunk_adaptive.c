@@ -53,8 +53,7 @@ convert_text_memory_amount_to_bytes(const char *memory_amount)
  */
 TS_FUNCTION_INFO_V1(set_memory_cache_size);
 
-Datum
-set_memory_cache_size(PG_FUNCTION_ARGS)
+TS_FUNCTION(set_memory_cache_size)
 {
 	const char *memory_amount = text_to_cstring(PG_GETARG_TEXT_P(0));
 
@@ -385,8 +384,7 @@ TS_FUNCTION_INFO_V1(calculate_chunk_interval);
  * This will then allow the algorithm to work in the normal way to adjust
  * further if needed.
  */
-Datum
-calculate_chunk_interval(PG_FUNCTION_ARGS)
+TS_FUNCTION(calculate_chunk_interval)
 {
 	int32		dimension_id = PG_GETARG_INT32(0);
 	int64		dimension_coord = PG_GETARG_INT64(1);
@@ -692,8 +690,7 @@ TS_FUNCTION_INFO_V1(chunk_adaptive_set);
 /*
  * Change the settings for adaptive chunking.
  */
-Datum
-chunk_adaptive_set(PG_FUNCTION_ARGS)
+TS_FUNCTION(chunk_adaptive_set)
 {
 	ChunkSizingInfo info = {
 		.table_relid = PG_GETARG_OID(0),

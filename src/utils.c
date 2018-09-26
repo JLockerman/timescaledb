@@ -34,8 +34,7 @@ TS_FUNCTION_INFO_V1(pg_timestamp_to_microseconds);
 /*
  * Convert a Postgres TIMESTAMP to BIGINT microseconds relative the Postgres epoch.
  */
-Datum
-pg_timestamp_to_microseconds(PG_FUNCTION_ARGS)
+TS_FUNCTION(pg_timestamp_to_microseconds)
 {
 	TimestampTz timestamp = PG_GETARG_TIMESTAMPTZ(0);
 	int64		microseconds;
@@ -63,8 +62,7 @@ TS_FUNCTION_INFO_V1(pg_microseconds_to_timestamp);
 /*
  * Convert BIGINT microseconds relative the UNIX epoch to a Postgres TIMESTAMP.
  */
-Datum
-pg_microseconds_to_timestamp(PG_FUNCTION_ARGS)
+TS_FUNCTION(pg_microseconds_to_timestamp)
 {
 	int64		microseconds = PG_GETARG_INT64(0);
 	TimestampTz timestamp;
@@ -88,8 +86,7 @@ TS_FUNCTION_INFO_V1(pg_timestamp_to_unix_microseconds);
 /*
  * Convert a Postgres TIMESTAMP to BIGINT microseconds relative the UNIX epoch.
  */
-Datum
-pg_timestamp_to_unix_microseconds(PG_FUNCTION_ARGS)
+TS_FUNCTION(pg_timestamp_to_unix_microseconds)
 {
 	TimestampTz timestamp = PG_GETARG_TIMESTAMPTZ(0);
 	int64		epoch_diff_microseconds = (POSTGRES_EPOCH_JDATE - UNIX_EPOCH_JDATE) * USECS_PER_DAY;
@@ -123,8 +120,7 @@ TS_FUNCTION_INFO_V1(pg_unix_microseconds_to_timestamp);
 /*
  * Convert BIGINT microseconds relative the UNIX epoch to a Postgres TIMESTAMP.
  */
-Datum
-pg_unix_microseconds_to_timestamp(PG_FUNCTION_ARGS)
+TS_FUNCTION(pg_unix_microseconds_to_timestamp)
 {
 	int64		microseconds = PG_GETARG_INT64(0);
 	TimestampTz timestamp;
@@ -154,8 +150,7 @@ pg_unix_microseconds_to_timestamp(PG_FUNCTION_ARGS)
 
 TS_FUNCTION_INFO_V1(time_to_internal);
 
-Datum
-time_to_internal(PG_FUNCTION_ARGS)
+TS_FUNCTION(time_to_internal)
 {
 	if (PG_ARGISNULL(0))
 		PG_RETURN_NULL();
@@ -184,16 +179,16 @@ time_value_to_internal(Datum time_val, Oid type_oid, bool failure_ok)
 			 * for timestamps, ignore timezones, make believe the timestamp is
 			 * at UTC
 			 */
-			res = DirectFunctionCall1(pg_timestamp_to_unix_microseconds, time_val);
+			res = DirectFunctionCall1(ts_pg_timestamp_to_unix_microseconds, time_val);
 
 			return DatumGetInt64(res);
 		case TIMESTAMPTZOID:
-			res = DirectFunctionCall1(pg_timestamp_to_unix_microseconds, time_val);
+			res = DirectFunctionCall1(ts_pg_timestamp_to_unix_microseconds, time_val);
 
 			return DatumGetInt64(res);
 		case DATEOID:
 			tz = DirectFunctionCall1(date_timestamp, time_val);
-			res = DirectFunctionCall1(pg_timestamp_to_unix_microseconds, tz);
+			res = DirectFunctionCall1(ts_pg_timestamp_to_unix_microseconds, tz);
 
 			return DatumGetInt64(res);
 		default:
@@ -276,8 +271,7 @@ get_interval_period_timestamp_units(Interval *interval)
 }
 
 TS_FUNCTION_INFO_V1(timestamp_bucket);
-Datum
-timestamp_bucket(PG_FUNCTION_ARGS)
+TS_FUNCTION(timestamp_bucket)
 {
 	Interval   *interval = PG_GETARG_INTERVAL_P(0);
 	Timestamp	timestamp = PG_GETARG_TIMESTAMP(1);
@@ -308,8 +302,7 @@ timestamp_bucket(PG_FUNCTION_ARGS)
 }
 
 TS_FUNCTION_INFO_V1(timestamptz_bucket);
-Datum
-timestamptz_bucket(PG_FUNCTION_ARGS)
+TS_FUNCTION(timestamptz_bucket)
 {
 	Interval   *interval = PG_GETARG_INTERVAL_P(0);
 	TimestampTz timestamp = PG_GETARG_TIMESTAMPTZ(1);
@@ -366,8 +359,7 @@ check_period_is_daily(int64 period)
 
 TS_FUNCTION_INFO_V1(date_bucket);
 
-Datum
-date_bucket(PG_FUNCTION_ARGS)
+TS_FUNCTION(date_bucket)
 {
 	Interval   *interval = PG_GETARG_INTERVAL_P(0);
 	DateADT		date = PG_GETARG_DATEADT(1);
@@ -384,7 +376,7 @@ date_bucket(PG_FUNCTION_ARGS)
 
 	/* convert to timestamp (NOT tz), bucket, convert back to date */
 	converted_ts = DirectFunctionCall1(date_timestamp, PG_GETARG_DATUM(1));
-	bucketed = DirectFunctionCall2(timestamp_bucket, PG_GETARG_DATUM(0), converted_ts);
+	bucketed = DirectFunctionCall2(ts_timestamp_bucket, PG_GETARG_DATUM(0), converted_ts);
 	return DirectFunctionCall1(timestamp_date, bucketed);
 }
 

@@ -1,6 +1,7 @@
 #ifndef BGW_JOB_H
 #define BGW_JOB_H
 
+#include "export.h"
 #include "catalog.h"
 #include <postmaster/bgworker.h>
 
@@ -34,7 +35,7 @@ extern TimestampTz bgw_job_timeout_at(BgwJob *job, TimestampTz start_time);
 
 bool		bgw_job_execute(BgwJob *job);
 
-PGDLLEXPORT extern Datum ts_bgw_job_entrypoint(PG_FUNCTION_ARGS);
+extern TS_FUNCTION(bgw_job_entrypoint);
 extern void bgw_job_set_unknown_job_type_hook(unknown_job_type_hook_type hook);
 extern void bgw_job_set_job_entrypoint_function_name(char *func_name);
 

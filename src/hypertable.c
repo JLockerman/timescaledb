@@ -948,7 +948,7 @@ hypertable_has_tuples(Oid table_relid, LOCKMODE lockmode)
 }
 
 static void
-hypertable_create_schema(const char *schema_name)
+ts_hypertable_create_schema(const char *schema_name)
 {
 	CreateSchemaStmt stmt = {
 		.schemaname = (char *) schema_name,
@@ -1037,8 +1037,7 @@ hypertable_validate_constraints(Oid relid)
  */
 TS_FUNCTION_INFO_V1(hypertable_insert_blocker);
 
-Datum
-hypertable_insert_blocker(PG_FUNCTION_ARGS)
+TS_FUNCTION(hypertable_insert_blocker)
 {
 	TriggerData *trigdata = (TriggerData *) fcinfo->context;
 	const char *relname = get_rel_name(trigdata->tg_relation->rd_id);
@@ -1151,8 +1150,7 @@ TS_FUNCTION_INFO_V1(hypertable_insert_blocker_trigger_add);
  * In case the hypertable's root table has data in it, we bail out with an
  * error instructing the user to fix the issue first.
  */
-Datum
-hypertable_insert_blocker_trigger_add(PG_FUNCTION_ARGS)
+TS_FUNCTION(hypertable_insert_blocker_trigger_add)
 {
 	Oid			relid = PG_GETARG_OID(0);
 	Oid			old_trigger;
@@ -1207,8 +1205,7 @@ TS_FUNCTION_INFO_V1(hypertable_create);
  * chunk_sizing_func       OID = NULL
  * chunk_target_size       TEXT = NULL
  */
-Datum
-hypertable_create(PG_FUNCTION_ARGS)
+TS_FUNCTION(hypertable_create)
 {
 	Oid			table_relid = PG_GETARG_OID(0);
 	Name		associated_schema_name = PG_ARGISNULL(4) ? NULL : PG_GETARG_NAME(4);
@@ -1370,7 +1367,7 @@ hypertable_create(PG_FUNCTION_ARGS)
 
 	/* Create the associated schema if it doesn't already exist */
 	if (!OidIsValid(associated_schema_oid))
-		hypertable_create_schema(NameStr(*associated_schema_name));
+		ts_hypertable_create_schema(NameStr(*associated_schema_name));
 
 	/*
 	 * Hypertables do not support transition tables in triggers, so if the
@@ -1416,10 +1413,10 @@ hypertable_create(PG_FUNCTION_ARGS)
 	Assert(time_dim_info.ht != NULL);
 
 	/* Add validated dimensions */
-	dimension_add_from_info(&time_dim_info);
+	ts_dimension_add_from_info(&time_dim_info);
 
 	if (DIMENSION_INFO_IS_SET(&space_dim_info))
-		dimension_add_from_info(&space_dim_info);
+		ts_dimension_add_from_info(&space_dim_info);
 
 	/* Refresh the cache to get the updated hypertable with added dimensions */
 	cache_release(hcache);
@@ -1437,7 +1434,7 @@ hypertable_create(PG_FUNCTION_ARGS)
 		NameData	tspc_name;
 
 		namestrcpy(&tspc_name, get_tablespace_name(tspc_oid));
-		tablespace_attach_internal(&tspc_name, table_relid, false);
+		ts_tablespace_attach_internal(&tspc_name, table_relid, false);
 	}
 
 	/*

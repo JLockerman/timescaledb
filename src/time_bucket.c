@@ -24,9 +24,8 @@
 	} while (0)
 
 
-TS_FUNCTION_INFO_V1(ts_int16_bucket);
-Datum
-ts_int16_bucket(PG_FUNCTION_ARGS)
+TS_FUNCTION_INFO_V1(int16_bucket);
+TS_FUNCTION(int16_bucket)
 {
 	int16		result;
 
@@ -35,9 +34,8 @@ ts_int16_bucket(PG_FUNCTION_ARGS)
 	PG_RETURN_INT16(result);
 }
 
-TS_FUNCTION_INFO_V1(ts_int32_bucket);
-Datum
-ts_int32_bucket(PG_FUNCTION_ARGS)
+TS_FUNCTION_INFO_V1(int32_bucket);
+TS_FUNCTION(int32_bucket)
 {
 	int32		result;
 
@@ -46,9 +44,8 @@ ts_int32_bucket(PG_FUNCTION_ARGS)
 	PG_RETURN_INT32(result);
 }
 
-TS_FUNCTION_INFO_V1(ts_int64_bucket);
-Datum
-ts_int64_bucket(PG_FUNCTION_ARGS)
+TS_FUNCTION_INFO_V1(int64_bucket);
+TS_FUNCTION(int64_bucket)
 {
 	int64		result;
 

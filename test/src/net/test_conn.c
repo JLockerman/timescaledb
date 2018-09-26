@@ -11,8 +11,7 @@
 
 TS_FUNCTION_INFO_V1(test_conn);
 
-Datum
-test_conn(PG_FUNCTION_ARGS)
+TS_FUNCTION(test_conn)
 {
 	char		response[MAX_RESULT_SIZE];
 	Connection *conn;
