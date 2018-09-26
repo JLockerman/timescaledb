@@ -59,9 +59,9 @@ const char *const BAD_RESPONSES[] = {
 int			TEST_LENGTHS[] = {14, 14, 14, 14};
 const char *MESSAGE_BODY[] = {"{\"status\":200}", "{\"status\":200}", "{\"status\":200}", "{\"status\":201}"};
 
-TS_FUNCTION_INFO_V1(ts_test_http_parsing);
-TS_FUNCTION_INFO_V1(ts_test_http_parsing_full);
-TS_FUNCTION_INFO_V1(ts_test_http_request_build);
+TS_FUNCTION_INFO_V1(test_http_parsing);
+TS_FUNCTION_INFO_V1(test_http_parsing_full);
+TS_FUNCTION_INFO_V1(test_http_request_build);
 
 static int
 num_test_strings()
@@ -70,8 +70,7 @@ num_test_strings()
 }
 
 /*  Check we can succesfully parse partial by well-formed HTTP responses */
-Datum
-ts_test_http_parsing(PG_FUNCTION_ARGS)
+TS_FUNCTION(test_http_parsing)
 {
 	int			num_iterations = PG_GETARG_INT32(0);
 	int			bytes,
@@ -116,8 +115,7 @@ ts_test_http_parsing(PG_FUNCTION_ARGS)
 /*  Check we can successfully parse full, well-formed HTTP response AND
  *  successfully find error with full, poorly-formed HTTP responses
  */
-Datum
-ts_test_http_parsing_full(PG_FUNCTION_ARGS)
+TS_FUNCTION(test_http_parsing_full)
 {
 	int			bytes,
 				i;
@@ -173,8 +171,7 @@ ts_test_http_parsing_full(PG_FUNCTION_ARGS)
 	PG_RETURN_NULL();
 }
 
-Datum
-ts_test_http_request_build(PG_FUNCTION_ARGS)
+TS_FUNCTION(test_http_request_build)
 {
 	const char *serialized;
 	size_t		request_len;

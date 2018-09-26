@@ -454,10 +454,9 @@ tablespace_delete_from_all(const char *tspcname, Oid userid)
 	return num_deleted;
 }
 
-TS_FUNCTION_INFO_V1(ts_tablespace_attach);
+TS_FUNCTION_INFO_V1(tablespace_attach);
 
-Datum
-ts_tablespace_attach(PG_FUNCTION_ARGS)
+TS_FUNCTION(tablespace_attach)
 {
 	Name		tspcname = PG_ARGISNULL(0) ? NULL : PG_GETARG_NAME(0);
 	Oid			hypertable_oid = PG_ARGISNULL(1) ? InvalidOid : PG_GETARG_OID(1);
@@ -604,10 +603,9 @@ ts_tablespace_detach_all(Oid hypertable_oid)
 	return ret;
 }
 
-TS_FUNCTION_INFO_V1(ts_tablespace_detach);
+TS_FUNCTION_INFO_V1(tablespace_detach);
 
-Datum
-ts_tablespace_detach(PG_FUNCTION_ARGS)
+TS_FUNCTION(tablespace_detach)
 {
 	Name		tspcname = PG_ARGISNULL(0) ? NULL : PG_GETARG_NAME(0);
 	Oid			hypertable_oid = PG_ARGISNULL(1) ? InvalidOid : PG_GETARG_OID(1);
@@ -644,10 +642,9 @@ ts_tablespace_detach(PG_FUNCTION_ARGS)
 	PG_RETURN_INT32(ret);
 }
 
-TS_FUNCTION_INFO_V1(ts_tablespace_detach_all_from_hypertable);
+TS_FUNCTION_INFO_V1(tablespace_detach_all_from_hypertable);
 
-Datum
-ts_tablespace_detach_all_from_hypertable(PG_FUNCTION_ARGS)
+TS_FUNCTION(tablespace_detach_all_from_hypertable)
 {
 	if (PG_NARGS() != 1)
 		elog(ERROR, "invalid number of arguments");
@@ -658,10 +655,9 @@ ts_tablespace_detach_all_from_hypertable(PG_FUNCTION_ARGS)
 	PG_RETURN_INT32(ts_tablespace_detach_all(PG_GETARG_OID(0)));
 }
 
-TS_FUNCTION_INFO_V1(ts_tablespace_show);
+TS_FUNCTION_INFO_V1(tablespace_show);
 
-Datum
-ts_tablespace_show(PG_FUNCTION_ARGS)
+TS_FUNCTION(tablespace_show)
 {
 	FuncCallContext *funcctx;
 	Oid			hypertable_oid = PG_ARGISNULL(0) ? InvalidOid : PG_GETARG_OID(0);

@@ -925,9 +925,8 @@ chunk_index_mark_clustered(Oid chunkrelid, Oid indexrelid)
 	heap_close(rel, AccessShareLock);
 }
 
-TS_FUNCTION_INFO_V1(ts_chunk_index_clone);
-Datum
-ts_chunk_index_clone(PG_FUNCTION_ARGS)
+TS_FUNCTION_INFO_V1(chunk_index_clone);
+TS_FUNCTION(chunk_index_clone)
 {
 	Oid			chunk_index_oid = PG_GETARG_OID(0);
 	Relation	chunk_index_rel;
@@ -962,9 +961,8 @@ ts_chunk_index_clone(PG_FUNCTION_ARGS)
 	PG_RETURN_OID(new_chunk_indexrelid);
 }
 
-TS_FUNCTION_INFO_V1(ts_chunk_index_replace);
-Datum
-ts_chunk_index_replace(PG_FUNCTION_ARGS)
+TS_FUNCTION_INFO_V1(chunk_index_replace);
+TS_FUNCTION(chunk_index_replace)
 {
 	Oid			chunk_index_oid_old = PG_GETARG_OID(0);
 	Oid			chunk_index_oid_new = PG_GETARG_OID(1);

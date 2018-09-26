@@ -1035,10 +1035,9 @@ hypertable_validate_constraints(Oid relid)
  *   included in a pg_dump. We also add logic to make sure this trigger is not
  *   propagated to chunks.
  */
-TS_FUNCTION_INFO_V1(ts_hypertable_insert_blocker);
+TS_FUNCTION_INFO_V1(hypertable_insert_blocker);
 
-Datum
-ts_hypertable_insert_blocker(PG_FUNCTION_ARGS)
+TS_FUNCTION(hypertable_insert_blocker)
 {
 	TriggerData *trigdata = (TriggerData *) fcinfo->context;
 	const char *relname = get_rel_name(trigdata->tg_relation->rd_id);
@@ -1141,7 +1140,7 @@ insert_blocker_trigger_add(Oid relid)
 	return objaddr.objectId;
 }
 
-TS_FUNCTION_INFO_V1(ts_hypertable_insert_blocker_trigger_add);
+TS_FUNCTION_INFO_V1(hypertable_insert_blocker_trigger_add);
 
 /*
  * This function is exposed to drop the old blocking trigger on legacy hypertables.
@@ -1151,8 +1150,7 @@ TS_FUNCTION_INFO_V1(ts_hypertable_insert_blocker_trigger_add);
  * In case the hypertable's root table has data in it, we bail out with an
  * error instructing the user to fix the issue first.
  */
-Datum
-ts_hypertable_insert_blocker_trigger_add(PG_FUNCTION_ARGS)
+TS_FUNCTION(hypertable_insert_blocker_trigger_add)
 {
 	Oid			relid = PG_GETARG_OID(0);
 	Oid			old_trigger;
@@ -1187,7 +1185,7 @@ ts_hypertable_insert_blocker_trigger_add(PG_FUNCTION_ARGS)
 	PG_RETURN_OID(insert_blocker_trigger_add(relid));
 }
 
-TS_FUNCTION_INFO_V1(ts_hypertable_create);
+TS_FUNCTION_INFO_V1(hypertable_create);
 
 /*
  * Create a hypertable from an existing table.
@@ -1207,8 +1205,7 @@ TS_FUNCTION_INFO_V1(ts_hypertable_create);
  * chunk_sizing_func       OID = NULL
  * chunk_target_size       TEXT = NULL
  */
-Datum
-ts_hypertable_create(PG_FUNCTION_ARGS)
+TS_FUNCTION(hypertable_create)
 {
 	Oid			table_relid = PG_GETARG_OID(0);
 	Name		associated_schema_name = PG_ARGISNULL(4) ? NULL : PG_GETARG_NAME(4);

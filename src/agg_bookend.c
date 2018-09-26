@@ -17,13 +17,13 @@
  *	 SELECT first(metric, time), last(metric, time) FROM metric GROUP BY hostname.
  */
 
-TS_FUNCTION_INFO_V1(ts_first_sfunc);
-TS_FUNCTION_INFO_V1(ts_first_combinefunc);
-TS_FUNCTION_INFO_V1(ts_last_sfunc);
-TS_FUNCTION_INFO_V1(ts_last_combinefunc);
-TS_FUNCTION_INFO_V1(ts_bookend_finalfunc);
-TS_FUNCTION_INFO_V1(ts_bookend_serializefunc);
-TS_FUNCTION_INFO_V1(ts_bookend_deserializefunc);
+TS_FUNCTION_INFO_V1(first_sfunc);
+TS_FUNCTION_INFO_V1(first_combinefunc);
+TS_FUNCTION_INFO_V1(last_sfunc);
+TS_FUNCTION_INFO_V1(last_combinefunc);
+TS_FUNCTION_INFO_V1(bookend_finalfunc);
+TS_FUNCTION_INFO_V1(bookend_serializefunc);
+TS_FUNCTION_INFO_V1(bookend_deserializefunc);
 
 /* A  PolyDatum represents a polymorphic datum */
 typedef struct PolyDatum
@@ -371,8 +371,7 @@ bookend_combinefunc(MemoryContext aggcontext, InternalCmpAggStore *state1, Inter
 }
 
 /* first(internal internal_state, anyelement value, "any" comparison_element) */
-Datum
-ts_first_sfunc(PG_FUNCTION_ARGS)
+TS_FUNCTION(first_sfunc)
 {
 	InternalCmpAggStore *store = PG_ARGISNULL(0) ? NULL : (InternalCmpAggStore *) PG_GETARG_POINTER(0);
 	PolyDatum	value = polydatum_from_arg(1, fcinfo);
@@ -389,8 +388,7 @@ ts_first_sfunc(PG_FUNCTION_ARGS)
 }
 
 /* last(internal internal_state, anyelement value, "any" comparison_element) */
-Datum
-ts_last_sfunc(PG_FUNCTION_ARGS)
+TS_FUNCTION(last_sfunc)
 {
 	InternalCmpAggStore *store = PG_ARGISNULL(0) ? NULL : (InternalCmpAggStore *) PG_GETARG_POINTER(0);
 	PolyDatum	value = polydatum_from_arg(1, fcinfo);
@@ -407,8 +405,7 @@ ts_last_sfunc(PG_FUNCTION_ARGS)
 }
 
 /* first_combinerfunc(internal, internal) => internal */
-Datum
-ts_first_combinefunc(PG_FUNCTION_ARGS)
+TS_FUNCTION(first_combinefunc)
 {
 	MemoryContext aggcontext;
 	InternalCmpAggStore *state1 = PG_ARGISNULL(0) ? NULL : (InternalCmpAggStore *) PG_GETARG_POINTER(0);
@@ -423,8 +420,7 @@ ts_first_combinefunc(PG_FUNCTION_ARGS)
 }
 
 /* last_combinerfunc(internal, internal) => internal */
-Datum
-ts_last_combinefunc(PG_FUNCTION_ARGS)
+TS_FUNCTION(last_combinefunc)
 {
 	MemoryContext aggcontext;
 	InternalCmpAggStore *state1 = PG_ARGISNULL(0) ? NULL : (InternalCmpAggStore *) PG_GETARG_POINTER(0);
@@ -440,8 +436,7 @@ ts_last_combinefunc(PG_FUNCTION_ARGS)
 
 
 /* ts_bookend_serializefunc(internal) => bytea */
-Datum
-ts_bookend_serializefunc(PG_FUNCTION_ARGS)
+TS_FUNCTION(bookend_serializefunc)
 {
 	StringInfoData buf;
 	InternalCmpAggStoreIOState *my_extra;
@@ -464,8 +459,7 @@ ts_bookend_serializefunc(PG_FUNCTION_ARGS)
 }
 
 /* ts_bookend_deserializefunc(bytea, internal) => internal */
-Datum
-ts_bookend_deserializefunc(PG_FUNCTION_ARGS)
+TS_FUNCTION(bookend_deserializefunc)
 {
 	bytea	   *sstate;
 	StringInfoData buf;
@@ -500,8 +494,7 @@ ts_bookend_deserializefunc(PG_FUNCTION_ARGS)
 
 
 /* ts_bookend_finalfunc(internal, anyelement, "any") => anyelement */
-Datum
-ts_bookend_finalfunc(PG_FUNCTION_ARGS)
+TS_FUNCTION(bookend_finalfunc)
 {
 	InternalCmpAggStore *state;
 

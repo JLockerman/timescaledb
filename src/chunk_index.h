@@ -5,6 +5,8 @@
 #include <nodes/parsenodes.h>
 #include <fmgr.h>
 
+#include "export.h"
+
 typedef struct Chunk Chunk;
 typedef struct Hypertable Hypertable;
 
@@ -47,7 +49,7 @@ extern void chunk_index_mark_clustered(Oid chunkrelid, Oid indexrelid);
  * Note that both reindex and recreate both block writes to table. Also note that recreate
  * will use more disk space than reindex during phase 1 and does more total work.
  */
-PGDLLEXPORT Datum ts_chunk_index_clone(PG_FUNCTION_ARGS);
-PGDLLEXPORT Datum ts_chunk_index_replace(PG_FUNCTION_ARGS);
+TS_FUNCTION(chunk_index_clone);
+TS_FUNCTION(chunk_index_replace);
 
 #endif							/* TIMESCALEDB_CHUNK_INDEX_H */

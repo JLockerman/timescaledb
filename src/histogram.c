@@ -23,15 +23,14 @@
  * nbucket+2 buckets accounting for buckets outside the range.
  */
 
-TS_FUNCTION_INFO_V1(ts_hist_sfunc);
-TS_FUNCTION_INFO_V1(ts_hist_combinefunc);
-TS_FUNCTION_INFO_V1(ts_hist_serializefunc);
-TS_FUNCTION_INFO_V1(ts_hist_deserializefunc);
-TS_FUNCTION_INFO_V1(ts_hist_finalfunc);
+TS_FUNCTION_INFO_V1(hist_sfunc);
+TS_FUNCTION_INFO_V1(hist_combinefunc);
+TS_FUNCTION_INFO_V1(hist_serializefunc);
+TS_FUNCTION_INFO_V1(hist_deserializefunc);
+TS_FUNCTION_INFO_V1(hist_finalfunc);
 
 /* histogram(state, val, min, max, nbuckets) */
-Datum
-ts_hist_sfunc(PG_FUNCTION_ARGS)
+TS_FUNCTION(hist_sfunc)
 {
 	MemoryContext aggcontext;
 	bytea	   *state = (PG_ARGISNULL(0) ? NULL : PG_GETARG_BYTEA_P(0));
@@ -88,8 +87,7 @@ copy_state(MemoryContext aggcontext, bytea *state)
 }
 
 /* ts_hist_combinefunc(internal, internal) => internal */
-Datum
-ts_hist_combinefunc(PG_FUNCTION_ARGS)
+TS_FUNCTION(hist_combinefunc)
 {
 	MemoryContext aggcontext;
 
@@ -132,8 +130,7 @@ ts_hist_combinefunc(PG_FUNCTION_ARGS)
 }
 
 /* ts_hist_serializefunc(internal) => bytea */
-Datum
-ts_hist_serializefunc(PG_FUNCTION_ARGS)
+TS_FUNCTION(hist_serializefunc)
 {
 	bytea	   *state;
 	Datum	   *hist;
@@ -152,8 +149,7 @@ ts_hist_serializefunc(PG_FUNCTION_ARGS)
 }
 
 /* ts_hist_deserializefunc(bytea, internal) => internal */
-Datum
-ts_hist_deserializefunc(PG_FUNCTION_ARGS)
+TS_FUNCTION(hist_deserializefunc)
 {
 	bytea	   *state;
 	Datum	   *hist;
@@ -172,8 +168,7 @@ ts_hist_deserializefunc(PG_FUNCTION_ARGS)
 }
 
 /* hist_funalfunc(internal, val REAL, MIN REAL, MAX REAL, nbuckets INTEGER) => INTEGER[] */
-Datum
-ts_hist_finalfunc(PG_FUNCTION_ARGS)
+TS_FUNCTION(hist_finalfunc)
 {
 	bytea	   *state;
 	Datum	   *hist;

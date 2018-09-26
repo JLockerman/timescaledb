@@ -14,14 +14,14 @@
 
 const int32 ts_bgw_loader_api_version = 1;
 
-TS_FUNCTION_INFO_V1(ts_bgw_worker_reserve);
-TS_FUNCTION_INFO_V1(ts_bgw_worker_release);
-TS_FUNCTION_INFO_V1(ts_bgw_num_unreserved);
-TS_FUNCTION_INFO_V1(ts_bgw_db_workers_start);
+TS_FUNCTION_INFO_V1(bgw_worker_reserve);
+TS_FUNCTION_INFO_V1(bgw_worker_release);
+TS_FUNCTION_INFO_V1(bgw_num_unreserved);
+TS_FUNCTION_INFO_V1(bgw_db_workers_start);
 
-TS_FUNCTION_INFO_V1(ts_bgw_db_workers_stop);
+TS_FUNCTION_INFO_V1(bgw_db_workers_stop);
 
-TS_FUNCTION_INFO_V1(ts_bgw_db_workers_restart);
+TS_FUNCTION_INFO_V1(bgw_db_workers_restart);
 
 void
 bgw_interface_register_api_version()
@@ -32,21 +32,18 @@ bgw_interface_register_api_version()
 	*versionptr = (void *) &ts_bgw_loader_api_version;
 }
 
-Datum
-ts_bgw_worker_reserve(PG_FUNCTION_ARGS)
+TS_FUNCTION(bgw_worker_reserve)
 {
 	PG_RETURN_BOOL(bgw_total_workers_increment());
 }
 
-Datum
-ts_bgw_worker_release(PG_FUNCTION_ARGS)
+TS_FUNCTION(bgw_worker_release)
 {
 	bgw_total_workers_decrement();
 	PG_RETURN_VOID();
 }
 
-Datum
-ts_bgw_num_unreserved(PG_FUNCTION_ARGS)
+TS_FUNCTION(bgw_num_unreserved)
 {
 	int			unreserved_workers;
 
@@ -54,21 +51,18 @@ ts_bgw_num_unreserved(PG_FUNCTION_ARGS)
 	PG_RETURN_INT32(unreserved_workers);
 }
 
-Datum
-ts_bgw_db_workers_start(PG_FUNCTION_ARGS)
+TS_FUNCTION(bgw_db_workers_start)
 {
 	PG_RETURN_BOOL(bgw_message_send_and_wait(START, MyDatabaseId));
 }
 
-Datum
-ts_bgw_db_workers_stop(PG_FUNCTION_ARGS)
+TS_FUNCTION(bgw_db_workers_stop)
 {
 	PG_RETURN_BOOL(bgw_message_send_and_wait(STOP, MyDatabaseId));
 }
 
 
-Datum
-ts_bgw_db_workers_restart(PG_FUNCTION_ARGS)
+TS_FUNCTION(bgw_db_workers_restart)
 {
 	PG_RETURN_BOOL(bgw_message_send_and_wait(RESTART, MyDatabaseId));
 }

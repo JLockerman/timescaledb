@@ -311,16 +311,13 @@ part_func_cache_create(Oid argtype, TypeCacheEntry *tce, Oid coerce_funcid, Memo
 }
 
 /* _timescaledb_catalog.ts_get_partition_for_key(key anyelement) RETURNS INT */
-PGDLLEXPORT Datum ts_get_partition_for_key(PG_FUNCTION_ARGS);
-
-TS_FUNCTION_INFO_V1(ts_get_partition_for_key);
+TS_FUNCTION_INFO_V1(get_partition_for_key);
 
 /*
  * Partition hash function that first converts all inputs to text before
  * hashing.
  */
-Datum
-ts_get_partition_for_key(PG_FUNCTION_ARGS)
+TS_FUNCTION(get_partition_for_key)
 {
 	Datum		arg = PG_GETARG_DATUM(0);
 	PartFuncCache *pfc = fcinfo->flinfo->fn_extra;
@@ -365,9 +362,8 @@ ts_get_partition_for_key(PG_FUNCTION_ARGS)
 	PG_RETURN_INT32(res);
 }
 
-PGDLLEXPORT Datum ts_get_partition_hash(PG_FUNCTION_ARGS);
 
-TS_FUNCTION_INFO_V1(ts_get_partition_hash);
+TS_FUNCTION_INFO_V1(get_partition_hash);
 
 /*
  * Compute a partition hash value for any input type.
@@ -378,8 +374,7 @@ TS_FUNCTION_INFO_V1(ts_get_partition_hash);
  * exists, or the type cannot be resolved from the expression, the function
  * throws an error.
  */
-Datum
-ts_get_partition_hash(PG_FUNCTION_ARGS)
+TS_FUNCTION(get_partition_hash)
 {
 	Datum		arg = PG_GETARG_DATUM(0);
 	PartFuncCache *pfc = fcinfo->flinfo->fn_extra;

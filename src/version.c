@@ -124,10 +124,9 @@ version_parse(const char *version, VersionInfo *result)
 	return true;
 }
 
-TS_FUNCTION_INFO_V1(ts_version_get_info);
+TS_FUNCTION_INFO_V1(version_get_info);
 
-Datum
-ts_version_get_info(PG_FUNCTION_ARGS)
+TS_FUNCTION(version_get_info)
 {
 	VersionInfo info;
 	TupleDesc	tupdesc;
@@ -159,10 +158,9 @@ ts_version_get_info(PG_FUNCTION_ARGS)
 
 const char *git_commit = STR(EXT_GIT_COMMIT);
 
-TS_FUNCTION_INFO_V1(ts_get_git_commit);
+TS_FUNCTION_INFO_V1(get_git_commit);
 
-Datum
-ts_get_git_commit(PG_FUNCTION_ARGS)
+TS_FUNCTION(get_git_commit)
 {
 	size_t		var_size = VARHDRSZ + strlen(git_commit);
 	text	   *version_text = (text *) palloc(var_size);
@@ -244,10 +242,9 @@ version_get_os_info(VersionOSInfo *info)
 }
 #endif							/* WIN32 */
 
-TS_FUNCTION_INFO_V1(ts_get_os_info);
+TS_FUNCTION_INFO_V1(get_os_info);
 
-Datum
-ts_get_os_info(PG_FUNCTION_ARGS)
+TS_FUNCTION(get_os_info)
 {
 	TupleDesc	tupdesc;
 	Datum		values[3];

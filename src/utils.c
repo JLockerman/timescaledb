@@ -29,13 +29,12 @@
 #include <utils/fmgrprotos.h>
 #endif
 
-TS_FUNCTION_INFO_V1(ts_pg_timestamp_to_microseconds);
+TS_FUNCTION_INFO_V1(pg_timestamp_to_microseconds);
 
 /*
  * Convert a Postgres TIMESTAMP to BIGINT microseconds relative the Postgres epoch.
  */
-Datum
-ts_pg_timestamp_to_microseconds(PG_FUNCTION_ARGS)
+TS_FUNCTION(pg_timestamp_to_microseconds)
 {
 	TimestampTz timestamp = PG_GETARG_TIMESTAMPTZ(0);
 	int64		microseconds;
@@ -58,13 +57,12 @@ ts_pg_timestamp_to_microseconds(PG_FUNCTION_ARGS)
 	PG_RETURN_INT64(microseconds);
 }
 
-TS_FUNCTION_INFO_V1(ts_pg_microseconds_to_timestamp);
+TS_FUNCTION_INFO_V1(pg_microseconds_to_timestamp);
 
 /*
  * Convert BIGINT microseconds relative the UNIX epoch to a Postgres TIMESTAMP.
  */
-Datum
-ts_pg_microseconds_to_timestamp(PG_FUNCTION_ARGS)
+TS_FUNCTION(pg_microseconds_to_timestamp)
 {
 	int64		microseconds = PG_GETARG_INT64(0);
 	TimestampTz timestamp;
@@ -83,13 +81,12 @@ ts_pg_microseconds_to_timestamp(PG_FUNCTION_ARGS)
 	PG_RETURN_TIMESTAMPTZ(timestamp);
 }
 
-TS_FUNCTION_INFO_V1(ts_pg_timestamp_to_unix_microseconds);
+TS_FUNCTION_INFO_V1(pg_timestamp_to_unix_microseconds);
 
 /*
  * Convert a Postgres TIMESTAMP to BIGINT microseconds relative the UNIX epoch.
  */
-Datum
-ts_pg_timestamp_to_unix_microseconds(PG_FUNCTION_ARGS)
+TS_FUNCTION(pg_timestamp_to_unix_microseconds)
 {
 	TimestampTz timestamp = PG_GETARG_TIMESTAMPTZ(0);
 	int64		epoch_diff_microseconds = (POSTGRES_EPOCH_JDATE - UNIX_EPOCH_JDATE) * USECS_PER_DAY;
@@ -118,13 +115,12 @@ ts_pg_timestamp_to_unix_microseconds(PG_FUNCTION_ARGS)
 	PG_RETURN_INT64(microseconds);
 }
 
-TS_FUNCTION_INFO_V1(ts_pg_unix_microseconds_to_timestamp);
+TS_FUNCTION_INFO_V1(pg_unix_microseconds_to_timestamp);
 
 /*
  * Convert BIGINT microseconds relative the UNIX epoch to a Postgres TIMESTAMP.
  */
-Datum
-ts_pg_unix_microseconds_to_timestamp(PG_FUNCTION_ARGS)
+TS_FUNCTION(pg_unix_microseconds_to_timestamp)
 {
 	int64		microseconds = PG_GETARG_INT64(0);
 	TimestampTz timestamp;
@@ -152,10 +148,9 @@ ts_pg_unix_microseconds_to_timestamp(PG_FUNCTION_ARGS)
 	PG_RETURN_TIMESTAMPTZ(timestamp);
 }
 
-TS_FUNCTION_INFO_V1(ts_time_to_internal);
+TS_FUNCTION_INFO_V1(time_to_internal);
 
-Datum
-ts_time_to_internal(PG_FUNCTION_ARGS)
+TS_FUNCTION(time_to_internal)
 {
 	if (PG_ARGISNULL(0))
 		PG_RETURN_NULL();
@@ -275,9 +270,8 @@ get_interval_period_timestamp_units(Interval *interval)
 #endif
 }
 
-TS_FUNCTION_INFO_V1(ts_timestamp_bucket);
-Datum
-ts_timestamp_bucket(PG_FUNCTION_ARGS)
+TS_FUNCTION_INFO_V1(timestamp_bucket);
+TS_FUNCTION(timestamp_bucket)
 {
 	Interval   *interval = PG_GETARG_INTERVAL_P(0);
 	Timestamp	timestamp = PG_GETARG_TIMESTAMP(1);
@@ -307,9 +301,8 @@ ts_timestamp_bucket(PG_FUNCTION_ARGS)
 	PG_RETURN_TIMESTAMP(result);
 }
 
-TS_FUNCTION_INFO_V1(ts_timestamptz_bucket);
-Datum
-ts_timestamptz_bucket(PG_FUNCTION_ARGS)
+TS_FUNCTION_INFO_V1(timestamptz_bucket);
+TS_FUNCTION(timestamptz_bucket)
 {
 	Interval   *interval = PG_GETARG_INTERVAL_P(0);
 	TimestampTz timestamp = PG_GETARG_TIMESTAMPTZ(1);
@@ -364,10 +357,9 @@ check_period_is_daily(int64 period)
 	}
 }
 
-TS_FUNCTION_INFO_V1(ts_date_bucket);
+TS_FUNCTION_INFO_V1(date_bucket);
 
-Datum
-ts_date_bucket(PG_FUNCTION_ARGS)
+TS_FUNCTION(date_bucket)
 {
 	Interval   *interval = PG_GETARG_INTERVAL_P(0);
 	DateADT		date = PG_GETARG_DATEADT(1);
