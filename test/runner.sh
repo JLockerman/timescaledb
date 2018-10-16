@@ -53,6 +53,7 @@ ${PSQL} $@ -U $TEST_ROLE_SUPERUSER -d ${TEST_DBNAME} -v ECHO=none -v MODULE_PATH
 
 export TEST_DBNAME
 
+#Add the TSL_MODULE_PATHNAME so we can reference C functions in tsl/test/src
 ${PSQL} -U ${TEST_PGUSER} \
      -v ON_ERROR_STOP=1 \
      -v VERBOSITY=terse \
@@ -68,4 +69,5 @@ ${PSQL} -U ${TEST_PGUSER} \
      -v ROLE_DEFAULT_PERM_USER=${TEST_ROLE_DEFAULT_PERM_USER} \
      -v ROLE_DEFAULT_PERM_USER_2=${TEST_ROLE_DEFAULT_PERM_USER_2} \
      -v MODULE_PATHNAME="'timescaledb-${EXT_VERSION}'" \
+     -v TSL_MODULE_PATHNAME="'timescaledb-tsl-${EXT_VERSION}'" \
      $@ -d ${TEST_DBNAME} 2>&1 | sed '/<exclude_from_test>/,/<\/exclude_from_test>/d'
