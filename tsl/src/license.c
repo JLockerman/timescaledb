@@ -106,7 +106,7 @@ tsl_license_update_check(PG_FUNCTION_ARGS)
 static bool
 license_deserialize_enterprise(char *license_key, LicenseInfo *license_out)
 {
-	LicenseInfo license_temp = {};
+	LicenseInfo license_temp = {0};
 	const LicenseInfo *license_info = NULL;
 	size_t		license_key_len = strlen(license_key);
 
