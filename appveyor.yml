@@ -140,11 +140,17 @@ test_script:
 
     docker exec -e IGNORES="bgw_db_scheduler" -e TEST_TABLESPACE1_PATH="C:\Users\$env:UserName\Documents\tablespace1\" -e TEST_TABLESPACE2_PATH="C:\Users\$env:UserName\Documents\tablespace2\" -e TEST_SPINWAIT_ITERS=10000 -e USER=postgres -it pgregress /bin/bash -c "cd /timescaledb/build && make regresschecklocal"
 
+    # TODO can we switch these to file swapping?
+
+    & "C:\Program Files\PostgreSQL\10\bin\psql.exe" -a -e -E -v "VERBOSITY=verbose" -c "ALTER SYSTEM SET timescaledb.license_key TO 'E1eyJlbmRfdGltZSI6IjIwMTgtMTAtMDEgKzAwMDAiLCAic3RhcnRfdGltZSI6IjIwMTgtMDktMDEgKzAwMDAiLCAiaWQiOiI0OTBGQjI2MC1BMjkyLTRBRDktOUFBMi0wMzYwODM1NzkxQjgiLCAia2luZCI6InRyaWFsIn0K';" -U postgres single
+
+    docker exec -e IGNORES="bgw_db_scheduler" -e TEST_TABLESPACE1_PATH="C:\Users\$env:UserName\Documents\tablespace1\" -e TEST_TABLESPACE2_PATH="C:\Users\$env:UserName\Documents\tablespace2\" -e TEST_SPINWAIT_ITERS=10000 -e USER=postgres -it pgregress /bin/bash -c "cd /timescaledb/build && make regresschecklocal-t"
+
     #TESTS=drop_extension
 
 on_failure:
   - ps: >-
-      docker exec -it pgregress cat /timescaledb/build/test/regression.diffs /timescaledb/build/test/pgtest/regressions.diffs
+      docker exec -it pgregress cat /timescaledb/build/test/regression.diffs /timescaledb/build/tsl/test/regression.diffs /timescaledb/build/test/pgtest/regressions.diffs
 
       Get-Content -Path "C:\Program Files\postgresql\10\data\pg_log\*"
 
