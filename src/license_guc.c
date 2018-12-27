@@ -248,7 +248,7 @@ loading_failed:
 
 /* SQL functions */
 
-Datum
+PGDLLEXPORT Datum
 ts_tsl_loaded(PG_FUNCTION_ARGS)
 {
 	if (TS_CURRENT_LICENSE_IS_APACHE_ONLY())
@@ -257,7 +257,7 @@ ts_tsl_loaded(PG_FUNCTION_ARGS)
 	PG_RETURN_BOOL(ts_cm_functions->check_tsl_loaded());
 }
 
-Datum
+PGDLLEXPORT Datum
 ts_enterprise_enabled(PG_FUNCTION_ARGS)
 {
 	if (TS_CURRENT_LICENSE_IS_APACHE_ONLY())
@@ -267,7 +267,7 @@ ts_enterprise_enabled(PG_FUNCTION_ARGS)
 }
 
 
-Datum
+PGDLLEXPORT Datum
 ts_current_license_key(PG_FUNCTION_ARGS)
 {
 	Assert(ts_guc_license_key != NULL);
@@ -279,7 +279,7 @@ ts_current_license_key(PG_FUNCTION_ARGS)
  * Apache only. This function allows us to bypass the test that usually disables
  * that.
  */
-Datum
+PGDLLEXPORT Datum
 ts_allow_downgrade_to_apache(PG_FUNCTION_ARGS)
 {
 	downgrade_to_apache_enabled = true;
