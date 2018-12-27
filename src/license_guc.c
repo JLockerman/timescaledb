@@ -146,7 +146,7 @@ ts_license_update_check(char **newval, void **extra, GucSource source)
 	module_can_start = DirectFunctionCall2(
 										   tsl_validate_license_fn,
 										   CStringGetDatum(*newval),
-										   PointerGetDatum(extra));
+										   PointerGetDatum(NULL));
 
 	return DatumGetBool(module_can_start);
 }
@@ -158,6 +158,9 @@ ts_license_update_check(char **newval, void **extra, GucSource source)
 void
 ts_license_on_assign(const char *newval, void *extra)
 {
+	void *license_extra = NULL;
+	void **extra_p = &license_extra;
+
 	if (!can_load)
 		return;
 
@@ -174,7 +177,17 @@ ts_license_on_assign(const char *newval, void *extra)
 	Assert(tsl_handle != NULL);
 	Assert(tsl_startup_fn != NULL);
 	DirectFunctionCall1(tsl_startup_fn, CharGetDatum(0));
-	ts_cm_functions->tsl_license_on_assign(newval, extra);
+
+	/*
+	 * Due to windows issues we cannot use the extra parameter. Instead re-call
+	 * the validation function, if we reach this point the license must be valid
+	 * so the function cannot fail cannot fail.
+	 */
+	DirectFunctionCall2(tsl_validate_license_fn,
+			CStringGetDatum(newval),
+			PointerGetDatum(extra_p));
+	Assert(license_extra != NULL);
+	ts_cm_functions->tsl_license_on_assign(newval, license_extra);
 }
 
 /* Module Functions */

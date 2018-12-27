@@ -80,24 +80,27 @@ tsl_license_update_check(PG_FUNCTION_ARGS)
 	bool		license_deserialized;
 	char	   *license_key = NULL;
 	LicenseInfo **guc_extra = NULL;
+	LicenseInfo license_info = {0};
 
 	Assert(!PG_ARGISNULL(0));
 	Assert(!PG_ARGISNULL(1));
 
 	license_key = PG_GETARG_CSTRING(0);
 	guc_extra = (LicenseInfo **) PG_GETARG_POINTER(1);
-	Assert(guc_extra != NULL);
 
-	/*
-	 * According to the postgres guc documentation, string `extra`s MUST be
-	 * allocated with `malloc`. (postgres attempts to `free` unneeded
-	 * guc-extras with the system `free` upon transaction commit, and there's
-	 * no guarantee that any MemoryContext uses the correct allocator.)
-	 */
-	*guc_extra = malloc(sizeof(LicenseInfo));
+	license_deserialized = license_deserialize_enterprise(license_key, &license_info);
+	if(guc_extra != NULL) {
+		/*
+		* According to the postgres guc documentation, string `extra`s MUST be
+		* allocated with `malloc`. (postgres attempts to `free` unneeded
+		* guc-extras with the system `free` upon transaction commit, and there's
+		* no guarantee that any MemoryContext uses the correct allocator.)
+		*/
+		*guc_extra = palloc(sizeof(LicenseInfo)); //malloc(sizeof(LicenseInfo));
+		memcpy(*guc_extra, &license_info, sizeof(LicenseInfo));
+	}
 
-	license_deserialized = license_deserialize_enterprise(license_key, *guc_extra);
-	PG_RETURN_BOOL(license_deserialized && validate_license_info(*guc_extra));
+	PG_RETURN_BOOL(license_deserialized && validate_license_info(&license_info));
 }
 
 /*
