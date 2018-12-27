@@ -161,6 +161,7 @@ ts_license_on_assign(const char *newval, void *extra)
 	if (!can_load)
 		return;
 
+	Assert(newval != NULL);
 	Assert(TS_LICENSE_TYPE_IS_VALID(newval));
 	if (TS_LICENSE_IS_APACHE_ONLY(newval))
 	{
@@ -170,6 +171,8 @@ ts_license_on_assign(const char *newval, void *extra)
 		return;
 	}
 
+	Assert(tsl_handle != NULL);
+	Assert(tsl_startup_fn != NULL);
 	DirectFunctionCall1(tsl_startup_fn, CharGetDatum(0));
 	ts_cm_functions->tsl_license_on_assign(newval, extra);
 }
