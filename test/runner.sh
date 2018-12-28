@@ -8,6 +8,7 @@ PG_REGRESS_PSQL=$1
 PSQL=${PSQL:-$PG_REGRESS_PSQL}
 TEST_PGUSER=${TEST_PGUSER:-postgres}
 TEST_DBNAME=${TEST_DBNAME:-single}
+TEST_DBNAME2=${TEST_DBNAME2:-single_2}
 TEST_INPUT_DIR=${TEST_INPUT_DIR:-${EXE_DIR}}
 TEST_OUTPUT_DIR=${TEST_OUTPUT_DIR:-${EXE_DIR}}
 
@@ -44,14 +45,14 @@ mkdir -p dump
 
 # set role permissions and reset database
 ${PSQL} $@ -U $USER -d postgres -v ECHO=none -c "ALTER USER $TEST_ROLE_SUPERUSER WITH SUPERUSER;"
-${PSQL} $@ -U $TEST_ROLE_SUPERUSER -d postgres -v ECHO=none -c "DROP DATABASE \"${TEST_DBNAME}\";" >/dev/null 2>&1 || :
-${PSQL} $@ -U $TEST_ROLE_SUPERUSER -d postgres -v ECHO=none -c "DROP DATABASE $TEST_DBNAME2;" >/dev/null 2>&1 || :
+${PSQL} $@ -U $TEST_ROLE_SUPERUSER -d postgres -v ECHO=none -c "DROP DATABASE IF EXISTS \"${TEST_DBNAME}\";" >/dev/null 2>&1 || :
+${PSQL} $@ -U $TEST_ROLE_SUPERUSER -d postgres -v ECHO=none -c "DROP DATABASE IF EXISTS \"${TEST_DBNAME2}\";" >/dev/null 2>&1 || :
 ${PSQL} $@ -U $TEST_ROLE_SUPERUSER -d postgres -v ECHO=none -c "CREATE DATABASE \"${TEST_DBNAME}\";"
-${PSQL} $@ -U $TEST_ROLE_SUPERUSER -d postgres -v ECHO=none -c "CREATE DATABASE \"${TEST_DBNAME2}\";"
 ${PSQL} $@ -U $TEST_ROLE_SUPERUSER -d ${TEST_DBNAME} -v ECHO=none -c "set client_min_messages=error; CREATE EXTENSION timescaledb;"
 ${PSQL} $@ -U $TEST_ROLE_SUPERUSER -d ${TEST_DBNAME} -v ECHO=none -v MODULE_PATHNAME="'timescaledb-${EXT_VERSION}'" < ${CURRENT_DIR}/sql/utils/testsupport.sql >/dev/null 2>&1 || :
 
 export TEST_DBNAME
+export TEST_DBNAME2
 
 #Add the TSL_MODULE_PATHNAME so we can reference C functions in tsl/test/src
 ${PSQL} -U ${TEST_PGUSER} \
