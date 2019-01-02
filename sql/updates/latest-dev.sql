@@ -29,3 +29,5 @@ CREATE TABLE IF NOT EXISTS _timescaledb_internal.bgw_policy_chunk_stats (
 GRANT SELECT ON _timescaledb_config.bgw_policy_reorder TO PUBLIC;
 GRANT SELECT ON _timescaledb_config.bgw_policy_drop_chunks TO PUBLIC;
 GRANT SELECT ON _timescaledb_internal.bgw_policy_chunk_stats TO PUBLIC;
+
+-- this stuff will only go out in 1.foo
