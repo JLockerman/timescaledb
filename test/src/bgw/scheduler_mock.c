@@ -27,6 +27,7 @@
 #include "bgw/job.h"
 #include "bgw/job_stat.h"
 #include "timer_mock.h"
+#include "test_jobs.h"
 #include "params.h"
 
 
@@ -37,22 +38,6 @@ TS_FUNCTION_INFO_V1(ts_bgw_db_scheduler_test_main);
 TS_FUNCTION_INFO_V1(ts_bgw_job_execute_test);
 TS_FUNCTION_INFO_V1(ts_test_bgw_job_insert_relation);
 TS_FUNCTION_INFO_V1(ts_test_bgw_job_delete_by_id);
-
-typedef enum TestJobType
-{
-	TEST_JOB_TYPE_JOB_1 = 0,
-	TEST_JOB_TYPE_JOB_2_ERROR,
-	TEST_JOB_TYPE_JOB_3_LONG,
-	TEST_JOB_TYPE_JOB_4,
-	_MAX_TEST_JOB_TYPE
-} TestJobType;
-
-static const char *test_job_type_names[_MAX_TEST_JOB_TYPE] = {
-	[TEST_JOB_TYPE_JOB_1] = "bgw_test_job_1",
-	[TEST_JOB_TYPE_JOB_2_ERROR] = "bgw_test_job_2_error",
-	[TEST_JOB_TYPE_JOB_3_LONG] = "bgw_test_job_3_long",
-	[TEST_JOB_TYPE_JOB_4] = "bgw_test_job_4",
-};
 
 static char *
 serialize_test_parameters(int32 ttl)
@@ -170,88 +155,10 @@ ts_bgw_db_scheduler_test_wait_for_scheduler_finish(PG_FUNCTION_ARGS)
 }
 
 static bool
-test_job_1()
-{
-	StartTransactionCommand();
-	elog(WARNING, "Execute job 1");
-
-	CommitTransactionCommand();
-	return true;
-}
-
-static bool
-test_job_2_error()
-{
-	StartTransactionCommand();
-	elog(WARNING, "Before error job 2");
-
-	elog(ERROR, "Error job 2");
-
-	elog(WARNING, "After error job 2");
-
-	CommitTransactionCommand();
-	return true;
-}
-
-static pqsigfunc prev_signal_func = NULL;
-
-static void
-log_terminate_signal(SIGNAL_ARGS)
-{
-	elog(WARNING, "Job got term signal");
-
-	if (prev_signal_func != NULL)
-		prev_signal_func(postgres_signal_arg);
-}
-
-static bool
-test_job_3_long()
-{
-	BackgroundWorkerBlockSignals();
-
-	/*
-	 * Only set prev_signal_func once to prevent it from being set to
-	 * log_terminate_signal.
-	 */
-	if (prev_signal_func == NULL)
-		prev_signal_func = pqsignal(SIGTERM, log_terminate_signal);
-	/* Setup any signal handlers here */
-	BackgroundWorkerUnblockSignals();
-
-	elog(WARNING, "Before sleep job 3");
-
-	DirectFunctionCall1(pg_sleep, Float8GetDatum(0.5L));
-
-	elog(WARNING, "After sleep job 3");
-	return true;
-}
-
-/* Exactly like job 1, except a wrapper will change its next_start. */
-static bool
-test_job_4(void)
-{
-	StartTransactionCommand();
-	elog(WARNING, "Execute job 4");
-	CommitTransactionCommand();
-	return true;
-}
-
-static TestJobType
-get_test_job_type_from_name(Name job_type_name)
-{
-	int			i;
-
-	for (i = 0; i < _MAX_TEST_JOB_TYPE; i++)
-	{
-		if (namestrcmp(job_type_name, test_job_type_names[i]) == 0)
-			return i;
-	}
-	return _MAX_TEST_JOB_TYPE;
-}
-
-static bool
 test_job_dispatcher(BgwJob *job)
 {
+	int job_id;
+	job_type job_fn;
 	ts_register_emit_log_hook();
 	ts_bgw_log_set_application_name(NameStr(job->fd.application_name));
 
@@ -259,24 +166,22 @@ test_job_dispatcher(BgwJob *job)
 	ts_params_get();
 	CommitTransactionCommand();
 
-	switch (get_test_job_type_from_name(&job->fd.job_type))
-	{
-		case TEST_JOB_TYPE_JOB_1:
-			return test_job_1();
-		case TEST_JOB_TYPE_JOB_2_ERROR:
-			return test_job_2_error();
-		case TEST_JOB_TYPE_JOB_3_LONG:
-			return test_job_3_long();
-		case TEST_JOB_TYPE_JOB_4:
-			{
-				/* Set next_start to 200ms */
-				Interval   *new_interval = DatumGetIntervalP(DirectFunctionCall7(make_interval, Int32GetDatum(0), Int32GetDatum(0), Int32GetDatum(0), Int32GetDatum(0), Int32GetDatum(0), Int32GetDatum(0), Float8GetDatum(0.2)));
+	job_id = ts_test_job_get_by_name(&job->fd.job_type);
+	if (job_id < 0)
+		elog(ERROR, "unrecognized test job type: %s", NameStr(job->fd.job_type));
 
-				return ts_bgw_job_run_and_set_next_start(job, test_job_4, 3, new_interval);
-			}
-		case _MAX_TEST_JOB_TYPE:
-			elog(ERROR, "unrecognized test job type: %s", NameStr(job->fd.job_type));
+	job_fn = ts_test_job_get(job_id);
+
+	if (job_fn == test_job_4_delayed_start)
+	{
+		/* Set next_start to 200ms */
+		Interval   *new_interval = DatumGetIntervalP(DirectFunctionCall7(make_interval, Int32GetDatum(0), Int32GetDatum(0), Int32GetDatum(0), Int32GetDatum(0), Int32GetDatum(0), Int32GetDatum(0), Float8GetDatum(0.2)));
+
+		return ts_bgw_job_run_and_set_next_start(job, job_fn, 3, new_interval);
 	}
+	else
+		return job_fn();
+
 	return false;
 }
 
