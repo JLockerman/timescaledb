@@ -587,7 +587,8 @@ hypertable_insert_relation(Relation rel,
 	values[AttrNumberGetAttrOffset(Anum_hypertable_associated_schema_name)] = NameGetDatum(associated_schema_name);
 	values[AttrNumberGetAttrOffset(Anum_hypertable_num_dimensions)] = Int16GetDatum(num_dimensions);
 
-	if (NULL != chunk_sizing_func_schema && NULL != chunk_sizing_func_name)
+	if (NULL != chunk_sizing_func_schema && NULL != chunk_sizing_func_name
+		&& chunk_sizing_func_schema->data[0] != '\0' && chunk_sizing_func_name->data[0] != '\0')
 	{
 		values[AttrNumberGetAttrOffset(Anum_hypertable_chunk_sizing_func_schema)] = NameGetDatum(chunk_sizing_func_schema);
 		values[AttrNumberGetAttrOffset(Anum_hypertable_chunk_sizing_func_name)] = NameGetDatum(chunk_sizing_func_name);
@@ -1227,6 +1228,9 @@ create_hypertable_datum(FunctionCallInfo fcinfo, Hypertable *ht, bool created)
 	bool		nulls[Natts_create_hypertable] = {false};
 	HeapTuple	tuple;
 
+	if (fcinfo->flinfo == NULL)
+		return BoolGetDatum(true);
+
 	if (get_call_result_type(fcinfo, NULL, &tupdesc) != TYPEFUNC_COMPOSITE)
 		ereport(ERROR,
 				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
@@ -1269,10 +1273,10 @@ TS_FUNCTION_INFO_V1(ts_hypertable_create);
 Datum
 ts_hypertable_create(PG_FUNCTION_ARGS)
 {
-	Oid			table_relid = PG_GETARG_OID(0);
+	Oid			table_relid = PG_ARGISNULL(0) ? InvalidOid : PG_GETARG_OID(0);
 	Name		associated_schema_name = PG_ARGISNULL(4) ? NULL : PG_GETARG_NAME(4);
 	Name		associated_table_prefix = PG_ARGISNULL(5) ? NULL : PG_GETARG_NAME(5);
-	bool		create_default_indexes = PG_ARGISNULL(7) ? false : PG_GETARG_BOOL(7);
+	bool		create_default_indexes = PG_ARGISNULL(7) ? true : PG_GETARG_BOOL(7);
 	bool		if_not_exists = PG_ARGISNULL(8) ? false : PG_GETARG_BOOL(8);
 	bool		migrate_data = PG_ARGISNULL(10) ? false : PG_GETARG_BOOL(10);
 	DimensionInfo time_dim_info = {
@@ -1554,6 +1558,7 @@ ts_hypertable_create(PG_FUNCTION_ARGS)
 	ts_cache_release(hcache);
 
 	PG_RETURN_DATUM(retval);
+	PG_RETURN_BOOL(true);
 }
 
 /* Used as a tuple found function */
