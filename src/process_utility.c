@@ -2051,7 +2051,51 @@ process_create_trigger_end(Node *parsetree)
 	do { \
 		fcinfo.arg[arg_num] = val; \
 		fcinfo.argnull[arg_num] = false; \
-	} while(0);
+	} while(0)
+
+typedef struct hypertable_arg_info
+{
+	const char *arg_name;
+	Datum (*deserializer)(Oid, const DefElem *def, const char *);
+} hypertable_arg_info;
+
+#define DESERIALIZE_ERROR(def, value, type) \
+	ereport(ERROR, \
+		(errcode(ERRCODE_INVALID_PARAMETER_VALUE), \
+			errmsg("invalid value for %s.%s '%s'", \
+				def->defnamespace, def->defname, value), \
+			errhint("%s.%s must be a %s", def->defnamespace, def->defname, type)))
+
+static Datum
+name_datum_from_cstr(Oid table, const DefElem *def, const char *str)
+{
+	Name name = palloc(sizeof(*name));
+	namestrcpy(name, str);
+	return NameGetDatum(name);
+}
+
+static Datum
+bool_from_cstr(Oid table, const DefElem *def, const char *str)
+{
+	if (pg_strcasecmp(str, "true") == 0 || pg_strcasecmp(str, "on") == 0)
+		return BoolGetDatum(true);
+	else if (pg_strcasecmp(str, "false") == 0 || pg_strcasecmp(str, "off") == 0)
+		return BoolGetDatum(true);
+	else
+		DESERIALIZE_ERROR(def, str, "BOOLEAN");
+}
+
+static Datum
+timeinterval_from_cstr(Oid table, const DefElem *def, const char *str)
+{
+	elog(ERROR, "unimplemented %s", str);
+}
+
+static Datum
+unimplemented_from_cstr(Oid table, const DefElem *def, const char *str)
+{
+	elog(ERROR, "could not deserialize %s", str);
+}
 
 static void
 create_hypertable_from_options(Oid table_id, List *create_options)
@@ -2059,7 +2103,24 @@ create_hypertable_from_options(Oid table_id, List *create_options)
 	FunctionCallInfoData fcinfo;
 	Datum       result;
 	ListCell	*cell;
-	int num_args = 14;
+	static const hypertable_arg_info	hypertable_arg_info[] = {
+		{.arg_name = "table_id", .deserializer = unimplemented_from_cstr}, /*not actually usable, just here to make the code simpler*/
+		{.arg_name = "time_column", .deserializer = name_datum_from_cstr },
+		{.arg_name = "number_partitions", .deserializer = unimplemented_from_cstr },
+		{.arg_name = "associated_schema_name", .deserializer = name_datum_from_cstr },
+		{.arg_name = "associated_table_prefix", .deserializer = name_datum_from_cstr },
+		{.arg_name = "chunk_time_interval", .deserializer = timeinterval_from_cstr },
+		{.arg_name = "skip_default_indexes", .deserializer = bool_from_cstr },
+		{.arg_name = "if_not_exists", .deserializer = bool_from_cstr }, /* unneeded? */
+		{.arg_name = "partitioning_func", .deserializer = unimplemented_from_cstr }, /* not supported */
+		{.arg_name = "migrate_data", .deserializer = bool_from_cstr },
+	/* the remaining arguments are not supported */
+	/* chunk_sizing_func       OID = NULL */
+	/* chunk_target_size       TEXT = NULL */
+	/* time_partitioning_func  REGPROC = NULL */
+	};
+	const int num_args = 14;
+
 	InitFunctionCallInfoData(fcinfo, NULL, num_args, InvalidOid, NULL, NULL);
 	for(int i = 0; i < num_args; i++)
 		fcinfo.argnull[i] = true;
@@ -2071,44 +2132,44 @@ create_hypertable_from_options(Oid table_id, List *create_options)
 	{
 		DefElem    *def = (DefElem *) lfirst(cell);
 		const char *value;
+		int 		i;
+		bool		argument_valid = false;
+		bool		duplicate_argument = false;
 		Assert(def->defnamespace != NULL && pg_strcasecmp(def->defnamespace, "hypertable") == 0);
 
-		if (def->arg != NULL)
-			value = defGetString(def);
-		else
-			value = "true";
+		for(i = 0; i < sizeof(hypertable_arg_info) / sizeof(*hypertable_arg_info); i++)
+		{
+			if (pg_strcasecmp(def->defname, hypertable_arg_info[i].arg_name) == 0)
+			{
+				argument_valid = true;
 
-		if (def->defname != NULL && pg_strcasecmp(def->defname, "time_column") == 0)
-		{
-			Name time_column_name = palloc(sizeof(*time_column_name));
-			namestrcpy(time_column_name, value);
-			/* time_column_name */
-			SET_ARG(1, NameGetDatum(time_column_name));
+				if (!fcinfo.argnull[i])
+				{
+					duplicate_argument = true;
+					break;
+				}
+
+				if (def->arg != NULL)
+					value = defGetString(def);
+				else
+					value = "true";
+
+				SET_ARG(i, hypertable_arg_info[i].deserializer(table_id, def, value));
+				break;
+			}
 		}
-		else
-		{
+		if (!argument_valid)
 			ereport(ERROR,
 				(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
 					errmsg("unrecognized parameter \"%s.%s\"",
 						def->defnamespace, def->defname)));
-		}
-	}
 
-	/* partitioning_column */
-	/* number_partitions       INTEGER = NULL */
-	/* associated_schema_name  NAME = NULL */
-	Name schema_name = palloc(sizeof(*schema_name));
-	namestrcpy(schema_name, "public");
-	SET_ARG(4, NameGetDatum(schema_name));
-	/* associated_table_prefix NAME = NULL */
-	/* chunk_time_interval     anyelement = NULL::BIGINT */
-	/* create_default_indexes  BOOLEAN = TRUE */
-	/* if_not_exists           BOOLEAN = FALSE */
-	/* partitioning_func       REGPROC = NULL */
-	/* migrate_data            BOOLEAN = FALSE */
-	/* chunk_sizing_func       OID = NULL */
-	/* chunk_target_size       TEXT = NULL */
-	/* time_partitioning_func  REGPROC = NULL */
+		if (duplicate_argument)
+			ereport(ERROR,
+				(errcode(ERRCODE_AMBIGUOUS_PARAMETER),
+					errmsg("duplicate parameter \"%s.%s\"",
+						def->defnamespace, def->defname)));
+	}
 
 	result = (*ts_hypertable_create) (&fcinfo);
 
