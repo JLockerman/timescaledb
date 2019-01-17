@@ -2090,6 +2090,20 @@ timeinterval_from_cstr(Oid table, const DefElem *def, const char *str)
 {
 	elog(ERROR, "unimplemented %s", str);
 }
+//
+static Datum
+integer_from_cstr(Oid table, const DefElem *def, const char *str)
+{
+	PG_TRY();
+	{
+		return Int32GetDatum(pg_atoi(str, sizeof(int32), '\0'));
+	}
+	PG_CATCH();
+	{
+		DESERIALIZE_ERROR(def, str, "INTEGER");
+	}
+	PG_END_TRY();
+}
 
 static Datum
 unimplemented_from_cstr(Oid table, const DefElem *def, const char *str)
