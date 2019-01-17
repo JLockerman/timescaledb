@@ -43,6 +43,8 @@ enum Anum_create_hypertable
 #define Natts_create_hypertable \
 	(_Anum_create_hypertable_max - 1)
 
+extern Datum ts_hypertable_create(PG_FUNCTION_ARGS);
+
 extern int	ts_number_of_hypertables(void);
 
 extern Oid	ts_rel_get_owner(Oid relid);

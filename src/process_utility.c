@@ -17,9 +17,11 @@
 #include <commands/defrem.h>
 #include <commands/trigger.h>
 #include <commands/tablecmds.h>
+#include <catalog/toasting.h>
 #include <commands/cluster.h>
 #include <commands/event_trigger.h>
 #include <access/htup_details.h>
+#include <access/reloptions.h>
 #include <access/xact.h>
 #include <utils/rel.h>
 #include <utils/lsyscache.h>
@@ -51,6 +53,7 @@
 #include "event_trigger.h"
 #include "extension.h"
 #include "hypercube.h"
+#include "hypertable.h"
 #include "hypertable_cache.h"
 #include "dimension_vector.h"
 #include "indexing.h"
@@ -1435,8 +1438,9 @@ process_cluster_start(Node *parsetree, ProcessUtilityContext context)
  * trigger or by running parse analysis manually).
  */
 static void
-process_create_table_end(Node *parsetree)
+process_create_table_end(CollectedCommand *cmd)
 {
+	Node *parsetree = cmd->parsetree;
 	CreateStmt *stmt = (CreateStmt *) parsetree;
 	ListCell   *lc;
 
@@ -2043,6 +2047,177 @@ process_create_trigger_end(Node *parsetree)
 	foreach_chunk_relation(stmt->relation, create_trigger_chunk, stmt);
 }
 
+#define SET_ARG(arg_num, val) \
+	do { \
+		fcinfo.arg[arg_num] = val; \
+		fcinfo.argnull[arg_num] = false; \
+	} while(0);
+
+static void
+create_hypertable_from_options(Oid table_id, List *create_options)
+{
+	FunctionCallInfoData fcinfo;
+	Datum       result;
+	ListCell	*cell;
+	int num_args = 14;
+	InitFunctionCallInfoData(fcinfo, NULL, num_args, InvalidOid, NULL, NULL);
+	for(int i = 0; i < num_args; i++)
+		fcinfo.argnull[i] = true;
+
+	/* main_table */
+	SET_ARG(0, table_id);
+
+	foreach(cell, create_options)
+	{
+		DefElem    *def = (DefElem *) lfirst(cell);
+		const char *value;
+		Assert(def->defnamespace != NULL && pg_strcasecmp(def->defnamespace, "hypertable") == 0);
+
+		if (def->arg != NULL)
+			value = defGetString(def);
+		else
+			value = "true";
+
+		if (def->defname != NULL && pg_strcasecmp(def->defname, "time_column") == 0)
+		{
+			Name time_column_name = palloc(sizeof(*time_column_name));
+			namestrcpy(time_column_name, value);
+			/* time_column_name */
+			SET_ARG(1, NameGetDatum(time_column_name));
+		}
+		else
+		{
+			ereport(ERROR,
+				(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+					errmsg("unrecognized parameter \"%s.%s\"",
+						def->defnamespace, def->defname)));
+		}
+	}
+
+	/* partitioning_column */
+	/* number_partitions       INTEGER = NULL */
+	/* associated_schema_name  NAME = NULL */
+	Name schema_name = palloc(sizeof(*schema_name));
+	namestrcpy(schema_name, "public");
+	SET_ARG(4, NameGetDatum(schema_name));
+	/* associated_table_prefix NAME = NULL */
+	/* chunk_time_interval     anyelement = NULL::BIGINT */
+	/* create_default_indexes  BOOLEAN = TRUE */
+	/* if_not_exists           BOOLEAN = FALSE */
+	/* partitioning_func       REGPROC = NULL */
+	/* migrate_data            BOOLEAN = FALSE */
+	/* chunk_sizing_func       OID = NULL */
+	/* chunk_target_size       TEXT = NULL */
+	/* time_partitioning_func  REGPROC = NULL */
+
+	result = (*ts_hypertable_create) (&fcinfo);
+
+	/* Check for null result, since caller is clearly not expecting one */
+	if (fcinfo.isnull)
+		elog(ERROR, "function %p returned NULL", (void *) ts_hypertable_create);
+}
+
+static bool
+process_create_table_start(ProcessUtilityArgs *args)
+{
+	/*
+	 * based on https://github.com/postgres/postgres/blob/97c39498e5ca9208d3de5a443a2282923619bf91/src/backend/tcop/utility.c#L982-L1083
+	 */
+	Node 	   *parsetree = args->parsetree;
+	const char *queryString = args->query_string;
+	ObjectAddress address;
+	ObjectAddress secondaryObject = InvalidObjectAddress;
+
+	List	   *stmts;
+	ListCell   *l;
+
+	/* Run parse analysis ... */
+	stmts = transformCreateStmt((CreateStmt *) parsetree,
+								queryString);
+
+	/* Ensure we only have CREATE statements, since those are the only ones we currently handle */
+	foreach(l, stmts)
+	{
+		Node	   *stmt = (Node *) lfirst(l);
+		if (!IsA(stmt, CreateStmt))
+			return false;
+	}
+
+	/* ... and do it */
+	foreach(l, stmts)
+	{
+		Node	   *stmt = (Node *) lfirst(l);
+
+		Assert(IsA(stmt, CreateStmt));
+		{
+			Datum		toast_options;
+			static char *validnsps[] = HEAP_RELOPT_NAMESPACES;
+			List *original_option_list = ((CreateStmt *) stmt)->options;
+			ListCell   *cell;
+			List		*postgres_options = NIL;
+			List *hypertable_create_options = NIL;
+
+			foreach(cell, original_option_list)
+			{
+				DefElem    *def = (DefElem *) lfirst(cell);
+				if (def->defnamespace != NULL && pg_strcasecmp(def->defnamespace, "hypertable") == 0)
+				{
+					hypertable_create_options = lappend(hypertable_create_options, def);
+				}
+				else
+				{
+					postgres_options = lappend(postgres_options, def);
+				}
+			}
+
+			((CreateStmt *) stmt)->options = postgres_options;
+
+			/* Create the table itself */
+			address = DefineRelation((CreateStmt *) stmt,
+										RELKIND_RELATION,
+										InvalidOid, NULL,
+										queryString);
+			EventTriggerCollectSimpleCommand(address,
+												secondaryObject,
+												stmt);
+
+			/*
+				* Let NewRelationCreateToastTable decide if this
+				* one needs a secondary relation too.
+				*/
+			CommandCounterIncrement();
+
+			/*
+				* parse and validate reloptions for the toast
+				* table
+				*/
+			toast_options = transformRelOptions((Datum) 0,
+												((CreateStmt *) stmt)->options,
+												"toast",
+												validnsps,
+												true,
+												false);
+			(void) heap_reloptions(RELKIND_TOASTVALUE,
+									toast_options,
+									true);
+
+			NewRelationCreateToastTable(address.objectId,
+										toast_options);
+
+			if (hypertable_create_options != NIL)
+			{
+				// PopActiveSnapshot();
+				// CommitTransactionCommand();
+				// StartTransactionCommand();
+				create_hypertable_from_options(address.objectId, hypertable_create_options);
+				hypertable_create_options = NIL;
+			}
+		}
+	}
+
+	return true;
+}
+
 /*
  * Handle DDL commands before they have been processed by PostgreSQL.
  */
@@ -2105,6 +2280,9 @@ process_ddl_command_start(ProcessUtilityArgs *args)
 		case T_ClusterStmt:
 			handled = process_cluster_start(args->parsetree, args->context);
 			break;
+		case T_CreateStmt:
+			handled = process_create_table_start(args);
+			break;
 		default:
 			break;
 	}
@@ -2121,7 +2299,7 @@ process_ddl_command_end(CollectedCommand *cmd)
 	switch (nodeTag(cmd->parsetree))
 	{
 		case T_CreateStmt:
-			process_create_table_end(cmd->parsetree);
+			process_create_table_end(cmd);
 			break;
 		case T_IndexStmt:
 			process_index_end(cmd->parsetree, cmd);
