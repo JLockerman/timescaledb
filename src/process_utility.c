@@ -59,6 +59,7 @@
 #include "indexing.h"
 #include "trigger.h"
 #include "utils.h"
+#include "with_clause_parser.h"
 
 void		_process_utility_init(void);
 void		_process_utility_fini(void);
@@ -2049,147 +2050,56 @@ process_create_trigger_end(Node *parsetree)
 
 #define SET_ARG(arg_num, val) \
 	do { \
-		fcinfo.arg[arg_num] = val; \
-		fcinfo.argnull[arg_num] = false; \
+		fcinfo->arg[arg_num] = val; \
+		fcinfo->argnull[arg_num] = false; \
 	} while(0)
 
-typedef struct hypertable_arg_info
+static bool
+handle_hypertable_with_clause(Size index, const char *name, Datum value, void *state)
 {
-	const char *arg_name;
-	Datum (*deserializer)(Oid, const DefElem *def, const char *);
-} hypertable_arg_info;
+	FunctionCallInfoData *fcinfo = state;
 
-#define DESERIALIZE_ERROR(def, value, type) \
-	ereport(ERROR, \
-		(errcode(ERRCODE_INVALID_PARAMETER_VALUE), \
-			errmsg("invalid value for %s.%s '%s'", \
-				def->defnamespace, def->defname, value), \
-			errhint("%s.%s must be a %s", def->defnamespace, def->defname, type)))
+	if (!fcinfo->argnull[index])
+		return false;
 
-static Datum
-name_datum_from_cstr(Oid table, const DefElem *def, const char *str)
-{
-	Name name = palloc(sizeof(*name));
-	namestrcpy(name, str);
-	return NameGetDatum(name);
-}
-
-static Datum
-bool_from_cstr(Oid table, const DefElem *def, const char *str)
-{
-	if (pg_strcasecmp(str, "true") == 0 || pg_strcasecmp(str, "on") == 0)
-		return BoolGetDatum(true);
-	else if (pg_strcasecmp(str, "false") == 0 || pg_strcasecmp(str, "off") == 0)
-		return BoolGetDatum(true);
-	else
-		DESERIALIZE_ERROR(def, str, "BOOLEAN");
-}
-
-static Datum
-timeinterval_from_cstr(Oid table, const DefElem *def, const char *str)
-{
-	elog(ERROR, "unimplemented %s", str);
-}
-//
-static Datum
-integer_from_cstr(Oid table, const DefElem *def, const char *str)
-{
-	PG_TRY();
-	{
-		return Int32GetDatum(pg_atoi(str, sizeof(int32), '\0'));
-	}
-	PG_CATCH();
-	{
-		DESERIALIZE_ERROR(def, str, "INTEGER");
-	}
-	PG_END_TRY();
-}
-
-static Datum
-unimplemented_from_cstr(Oid table, const DefElem *def, const char *str)
-{
-	elog(ERROR, "could not deserialize %s", str);
+	SET_ARG(index, value);
+	return true;
 }
 
 static void
 create_hypertable_from_options(Oid table_id, List *create_options)
 {
-	FunctionCallInfoData fcinfo;
-	Datum       result;
-	ListCell	*cell;
-	static const hypertable_arg_info	hypertable_arg_info[] = {
-		{.arg_name = "table_id", .deserializer = unimplemented_from_cstr}, /*not actually usable, just here to make the code simpler*/
-		{.arg_name = "time_column", .deserializer = name_datum_from_cstr },
-		{.arg_name = "number_partitions", .deserializer = unimplemented_from_cstr },
-		{.arg_name = "associated_schema_name", .deserializer = name_datum_from_cstr },
-		{.arg_name = "associated_table_prefix", .deserializer = name_datum_from_cstr },
-		{.arg_name = "chunk_time_interval", .deserializer = timeinterval_from_cstr },
-		{.arg_name = "skip_default_indexes", .deserializer = bool_from_cstr },
-		{.arg_name = "if_not_exists", .deserializer = bool_from_cstr }, /* unneeded? */
-		{.arg_name = "partitioning_func", .deserializer = unimplemented_from_cstr }, /* not supported */
-		{.arg_name = "migrate_data", .deserializer = bool_from_cstr },
-	/* the remaining arguments are not supported */
-	/* chunk_sizing_func       OID = NULL */
-	/* chunk_target_size       TEXT = NULL */
-	/* time_partitioning_func  REGPROC = NULL */
+	FunctionCallInfoData function_call_info;
+	FunctionCallInfoData *fcinfo = &function_call_info;
+	static const WithClauseArg	hypertable_arg_info[] = {
+		{.arg_name = "table_id", .deserializer = ts_with_clause_deserialize_unimplemented}, /*not actually usable, just here to make the code simpler*/
+		{.arg_name = "time_column", .deserializer = ts_with_clause_deserialize_name },
+		{.arg_name = "partitioning_column", .deserializer = ts_with_clause_deserialize_unimplemented },
+		{.arg_name = "number_partitions", .deserializer = ts_with_clause_deserialize_unimplemented },
+		{.arg_name = "associated_schema_name", .deserializer = ts_with_clause_deserialize_name },
+		{.arg_name = "associated_table_prefix", .deserializer = ts_with_clause_deserialize_name },
+		{.arg_name = "chunk_time_interval", .deserializer = ts_with_clause_deserialize_unimplemented },
+		{.arg_name = "create_default_indexes", .deserializer = ts_with_clause_deserialize_bool },
+		{.arg_name = "if_not_exists", .deserializer = ts_with_clause_deserialize_bool }, /* unneeded? */
+		{.arg_name = "partitioning_func", .deserializer = ts_with_clause_deserialize_unimplemented }, /* not supported */
+		{.arg_name = "migrate_data", .deserializer = ts_with_clause_deserialize_bool },
+		/* the remaining arguments are not supported */
+		{.arg_name = "chunk_sizing_func", .deserializer = ts_with_clause_deserialize_unimplemented },
+		{.arg_name = "chunk_target_size", .deserializer = ts_with_clause_deserialize_unimplemented },
+		{.arg_name = "time_partitioning_func", .deserializer = ts_with_clause_deserialize_unimplemented },
 	};
-	const int num_args = 14;
+	const Size num_args = sizeof(hypertable_arg_info) / sizeof(*hypertable_arg_info);
 
-	InitFunctionCallInfoData(fcinfo, NULL, num_args, InvalidOid, NULL, NULL);
+	InitFunctionCallInfoData(function_call_info, NULL, num_args, InvalidOid, NULL, NULL);
 	for(int i = 0; i < num_args; i++)
-		fcinfo.argnull[i] = true;
+		fcinfo->argnull[i] = true;
 
 	/* main_table */
 	SET_ARG(0, table_id);
 
-	foreach(cell, create_options)
-	{
-		DefElem    *def = (DefElem *) lfirst(cell);
-		const char *value;
-		int 		i;
-		bool		argument_valid = false;
-		bool		duplicate_argument = false;
-		Assert(def->defnamespace != NULL && pg_strcasecmp(def->defnamespace, "hypertable") == 0);
+	ts_with_clauses_apply(create_options, "hypertable", handle_hypertable_with_clause, hypertable_arg_info, num_args, fcinfo);
 
-		for(i = 0; i < sizeof(hypertable_arg_info) / sizeof(*hypertable_arg_info); i++)
-		{
-			if (pg_strcasecmp(def->defname, hypertable_arg_info[i].arg_name) == 0)
-			{
-				argument_valid = true;
-
-				if (!fcinfo.argnull[i])
-				{
-					duplicate_argument = true;
-					break;
-				}
-
-				if (def->arg != NULL)
-					value = defGetString(def);
-				else
-					value = "true";
-
-				SET_ARG(i, hypertable_arg_info[i].deserializer(table_id, def, value));
-				break;
-			}
-		}
-		if (!argument_valid)
-			ereport(ERROR,
-				(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-					errmsg("unrecognized parameter \"%s.%s\"",
-						def->defnamespace, def->defname)));
-
-		if (duplicate_argument)
-			ereport(ERROR,
-				(errcode(ERRCODE_AMBIGUOUS_PARAMETER),
-					errmsg("duplicate parameter \"%s.%s\"",
-						def->defnamespace, def->defname)));
-	}
-
-	result = (*ts_hypertable_create) (&fcinfo);
-
-	/* Check for null result, since caller is clearly not expecting one */
-	if (fcinfo.isnull)
-		elog(ERROR, "function %p returned NULL", (void *) ts_hypertable_create);
+	(*ts_hypertable_create) (fcinfo);
 }
 
 static bool
@@ -2228,22 +2138,10 @@ process_create_table_start(ProcessUtilityArgs *args)
 			Datum		toast_options;
 			static char *validnsps[] = HEAP_RELOPT_NAMESPACES;
 			List *original_option_list = ((CreateStmt *) stmt)->options;
-			ListCell   *cell;
 			List		*postgres_options = NIL;
 			List *hypertable_create_options = NIL;
 
-			foreach(cell, original_option_list)
-			{
-				DefElem    *def = (DefElem *) lfirst(cell);
-				if (def->defnamespace != NULL && pg_strcasecmp(def->defnamespace, "hypertable") == 0)
-				{
-					hypertable_create_options = lappend(hypertable_create_options, def);
-				}
-				else
-				{
-					postgres_options = lappend(postgres_options, def);
-				}
-			}
+			ts_with_clause_filter(original_option_list, "hypertable", &hypertable_create_options, &postgres_options);
 
 			((CreateStmt *) stmt)->options = postgres_options;
 
@@ -2280,13 +2178,7 @@ process_create_table_start(ProcessUtilityArgs *args)
 										toast_options);
 
 			if (hypertable_create_options != NIL)
-			{
-				// PopActiveSnapshot();
-				// CommitTransactionCommand();
-				// StartTransactionCommand();
 				create_hypertable_from_options(address.objectId, hypertable_create_options);
-				hypertable_create_options = NIL;
-			}
 		}
 	}
 

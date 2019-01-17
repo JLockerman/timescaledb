@@ -47,7 +47,8 @@ set(SOURCES
   time_bucket.c
   trigger.c
   utils.c
-  version.c)
+  version.c
+  with_clause_parser.c)
 
 # Add test source code in Debug builds
 if (CMAKE_BUILD_TYPE MATCHES Debug)
