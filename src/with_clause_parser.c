@@ -92,7 +92,7 @@ ts_with_clause_deserialize_bool(const DefElem *element, const char *value, void 
 	if (pg_strcasecmp(value, "true") == 0 || pg_strcasecmp(value, "on") == 0)
 		return BoolGetDatum(true);
 	else if (pg_strcasecmp(value, "false") == 0 || pg_strcasecmp(value, "off") == 0)
-		return BoolGetDatum(true);
+		return BoolGetDatum(false);
 	else
 		TS_WITH_DESERIALIZE_ERROR(element, value, "BOOLEAN");
 }
