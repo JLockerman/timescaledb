@@ -27,6 +27,7 @@
 #include "chunk_index.h"
 #include "hypertable.h"
 #include "hypertable_cache.h"
+#include "indexing.h"
 #include "catalog.h"
 #include "scanner.h"
 #include "chunk.h"
@@ -464,6 +465,7 @@ chunk_index_create(Relation hypertable_rel, int32 hypertable_id, Relation hypert
 					   get_rel_name(RelationGetRelid(hypertable_idxrel)));
 }
 
+
 void
 ts_chunk_index_create_from_adjusted_index_info(int32 hypertable_id, Relation hypertable_idxrel,
 											   int32 chunk_id, Relation chunkrel,
@@ -563,7 +565,18 @@ ts_chunk_index_create_all(int32 hypertable_id, Oid hypertable_relid, int32 chunk
 	foreach (lc, indexlist)
 	{
 		Oid hypertable_idxoid = lfirst_oid(lc);
-		Relation hypertable_idxrel = relation_open(hypertable_idxoid, AccessShareLock);
+		Relation hypertable_idxrel;
+		Name hypertable_idx_name = palloc(sizeof(*hypertable_idx_name));
+		OptionalIndexInfo *optional_iinfo;
+
+		namestrcpy(hypertable_idx_name, get_rel_name(hypertable_idxoid));
+
+		optional_iinfo = ts_indexing_optional_info_find_by_index_name(hypertable_idx_name);
+
+		if (optional_iinfo != NULL && optional_iinfo->fd.is_scheduled)
+			continue;
+
+		hypertable_idxrel = relation_open(hypertable_idxoid, AccessShareLock);
 
 		chunk_index_create(htrel,
 						   hypertable_id,

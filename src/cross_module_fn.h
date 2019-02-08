@@ -39,8 +39,10 @@ typedef struct CrossModuleFunctions
 	bool (*bgw_policy_job_execute)(BgwJob *job);
 	Datum (*add_drop_chunks_policy)(PG_FUNCTION_ARGS);
 	Datum (*add_reorder_policy)(PG_FUNCTION_ARGS);
+	Datum (*add_scheduled_index_policy)(PG_FUNCTION_ARGS);
 	Datum (*remove_drop_chunks_policy)(PG_FUNCTION_ARGS);
 	Datum (*remove_reorder_policy)(PG_FUNCTION_ARGS);
+	Datum (*remove_scheduled_index_policy)(PG_FUNCTION_ARGS);
 	void (*create_upper_paths_hook)(PlannerInfo *, UpperRelationKind, RelOptInfo *, RelOptInfo *);
 	PGFunction gapfill_marker;
 	PGFunction gapfill_int16_time_bucket;

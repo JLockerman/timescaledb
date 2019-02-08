@@ -49,6 +49,7 @@
 #include "chunk_index.h"
 #include "compat.h"
 #include "copy.h"
+#include "cross_module_fn.h"
 #include "errors.h"
 #include "event_trigger.h"
 #include "extension.h"
@@ -640,6 +641,35 @@ process_drop_hypertable_chunks(DropStmt *stmt)
 	return handled;
 }
 
+/* We remove the policy for a scheduled index before the index itself */
+static bool
+process_drop_hypertable_index(DropStmt *stmt)
+{
+	bool handled = false;
+	ListCell *lc;
+
+	foreach (lc, stmt->objects)
+	{
+		List *object = lfirst(lc);
+		Oid table_id;
+		RangeVar *index = makeRangeVarFromNameList(object);
+		NameData index_name = {};
+		namestrcpy(&index_name, index->relname);
+		OptionalIndexInfo *optional_iinfo = ts_indexing_optional_info_find_by_index_name(&index_name);
+		if (optional_iinfo == NULL || !optional_iinfo->fd.is_scheduled)
+			continue;
+
+		table_id = IndexGetRelation(RangeVarGetRelid(index, NoLock, true), true);
+
+		DirectFunctionCall2(ts_cm_functions->remove_scheduled_index_policy,
+			ObjectIdGetDatum(table_id),
+			BoolGetDatum(true));
+
+		handled = true;
+	}
+	return handled;
+}
+
 /* Note that DROP TABLESPACE does not have a hook in event triggers so cannot go
  * through process_ddl_sql_drop */
 static void
@@ -729,6 +759,9 @@ process_drop(Node *parsetree)
 	{
 		case OBJECT_TABLE:
 			process_drop_hypertable_chunks(stmt);
+			break;
+		case OBJECT_INDEX:
+			process_drop_hypertable_index(stmt);
 			break;
 		default:
 			break;
@@ -1242,6 +1275,7 @@ typedef struct HypertableIndexOptions
 	List *attnames;
 	int n_ht_atts;
 	bool ht_hasoid;
+	bool scheduled;
 
 	/* Concurrency testing options. */
 #ifdef DEBUG
@@ -1380,6 +1414,7 @@ process_index_chunk_multitransaction(int32 hypertable_id, Oid chunk_relid, void 
 typedef enum HypertableIndexFlags
 {
 	HypertableIndexFlagMultiTransaction = 0,
+	HypertableIndexFlagScheduled,
 #ifdef DEBUG
 	HypertableIndexFlagBarrierTable,
 	HypertableIndexFlagMaxChunks,
@@ -1388,6 +1423,7 @@ typedef enum HypertableIndexFlags
 
 static const WithClauseDefinition index_with_clauses[] = {
 	[HypertableIndexFlagMultiTransaction] = {.arg_name = "transaction_per_chunk", .type_id = BOOLOID,},
+	[HypertableIndexFlagScheduled] = {.arg_name = "scheduled", .type_id = BOOLOID,},
 #ifdef DEBUG
 	[HypertableIndexFlagBarrierTable] = {.arg_name = "barrier_table", .type_id = REGCLASSOID,},
 	[HypertableIndexFlagMaxChunks] = {.arg_name = "max_chunks", .type_id = INT4OID, .default_val = Int32GetDatum(-1)},
@@ -1463,12 +1499,16 @@ process_index_start(Node *parsetree, const char *queryString)
 
 	info.extended_options.multitransaction =
 		DatumGetBool(parsed_with_clauses[HypertableIndexFlagMultiTransaction].parsed);
+	info.extended_options.scheduled =
+		DatumGetBool(parsed_with_clauses[HypertableIndexFlagScheduled].parsed);
 #ifdef DEBUG
 	info.extended_options.max_chunks =
 		DatumGetInt32(parsed_with_clauses[HypertableIndexFlagMaxChunks].parsed);
 	info.extended_options.barrier_table =
 		DatumGetObjectId(parsed_with_clauses[HypertableIndexFlagBarrierTable].parsed);
 #endif
+
+	Assert(!(info.extended_options.multitransaction && info.extended_options.scheduled));
 
 	/* Make sure this index is allowed */
 	if (stmt->concurrent)
@@ -1498,7 +1538,28 @@ process_index_start(Node *parsetree, const char *queryString)
 
 	/* CREATE INDEX on the chunks */
 
-	/* create chunk indexes using the same transaction for all the chunks */
+	/*
+	 * if we're using scheduled index creation, don't create chunk indexes, just
+	 * create the job, and leave index creation for the bgw
+	 */
+	if (info.extended_options.scheduled)
+	{
+		Name index_name = palloc0(sizeof(*index_name));
+		char *index_name_str = get_rel_name(info.obj.objectId);
+
+		namestrcpy(index_name, index_name_str);
+
+		DirectFunctionCall3(ts_cm_functions->add_scheduled_index_policy,
+			ObjectIdGetDatum(ht->main_table_relid),
+			NameGetDatum(index_name),
+			BoolGetDatum(true));
+
+		ts_cache_release(hcache);
+		return true;
+	}
+
+
+	/* create chunk indexes using the same tranaction for all the chunks */
 	if (!info.extended_options.multitransaction)
 	{
 		CatalogSecurityContext sec_ctx;
