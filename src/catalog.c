@@ -210,7 +210,7 @@ static const char *catalog_table_serial_id_names[_MAX_CATALOG_TABLES] = {
 	[BGW_POLICY_REORDER] = NULL,
 	[BGW_POLICY_DROP_CHUNKS] = NULL,
 	[BGW_POLICY_SCHEDULED_INDEX] = NULL,
-	[OPTIONAL_INDEX_INFO] = CATALOG_SCHEMA_NAME ".optional_index_info",
+	[OPTIONAL_INDEX_INFO] = NULL,
 };
 
 typedef struct InternalFunctionDef
