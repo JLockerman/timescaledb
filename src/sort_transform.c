@@ -237,6 +237,7 @@ sort_transform_ec(PlannerInfo *root, EquivalenceClass *orig)
 {
 	ListCell *lc_member;
 	EquivalenceClass *newec = NULL;
+	bool propagate_to_children = false;
 
 	/* check all members, adding only transformable members to new ec */
 	foreach (lc_member, orig->ec_members)
@@ -289,13 +290,23 @@ sort_transform_ec(PlannerInfo *root, EquivalenceClass *orig)
 				newec->ec_derives = list_copy(orig->ec_derives);
 				newec->ec_relids = bms_copy(orig->ec_relids);
 				newec->ec_has_const = orig->ec_has_const;
-				newec->ec_has_volatile = orig->ec_has_volatile;
+
+				/* even if the original EC has volatile (it has time_bucket_gapfill)
+				 * this ordering is purely on the time column, so it is non-volatile
+				 * and should be propagated to the children
+				 */
+				newec->ec_has_volatile = false;
 				newec->ec_below_outer_join = orig->ec_below_outer_join;
 				newec->ec_broken = orig->ec_broken;
 				newec->ec_sortref = orig->ec_sortref;
 				newec->ec_merged = orig->ec_merged;
-			}
 
+				/* volatile ECs only ever have one member, that of the root,
+				 * so if the original EC was volatile, we need to propagate the
+				 * new EC to the children ourselves
+				 */
+				propagate_to_children = orig->ec_has_volatile;
+			}
 			newec->ec_members = lappend(newec->ec_members, em);
 		}
 	}
@@ -303,6 +314,24 @@ sort_transform_ec(PlannerInfo *root, EquivalenceClass *orig)
 	if (newec != NULL)
 	{
 		root->eq_classes = lappend(root->eq_classes, newec);
+		if(propagate_to_children)
+		{
+			Bitmapset *parents = bms_copy(newec->ec_relids);
+			ListCell *lc;
+			int parent;
+			bms_get_singleton_member(parents, &parent);
+
+			foreach(lc, root->append_rel_list)
+			{
+				AppendRelInfo *appinfo = lfirst(lc);
+				if(appinfo->parent_relid == parent)
+				{
+					RelOptInfo *parent_rel = root->simple_rel_array[appinfo->parent_relid];
+					RelOptInfo *child_rel = root->simple_rel_array[appinfo->child_relid];
+					add_child_rel_equivalences(root, appinfo, parent_rel, child_rel);
+				}
+			}
+		}
 		return newec;
 	}
 	return NULL;

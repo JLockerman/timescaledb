@@ -65,7 +65,7 @@ date_trunc_sort_transform(FuncExpr *func)
 	 (list_length((func)->args) == 2 || IsA(lthird((func)->args), Const)))
 
 static Expr *
-time_bucket_sort_transform(FuncExpr *func)
+time_bucket_gapfill_sort_transform(FuncExpr *func)
 {
 	/*
 	 * time_bucket(const, var, const) => var
@@ -74,14 +74,7 @@ time_bucket_sort_transform(FuncExpr *func)
 	 * > time2
 	 */
 	Expr *second;
-
 	Assert(list_length(func->args) >= 2);
-
-	/*
-	 * If period and offset are not constants we must not do the optimization
-	 */
-	if (!time_bucket_has_const_period_and_offset(func))
-		return (Expr *) func;
 
 	second = ts_sort_transform_expr(lsecond(func->args));
 
@@ -89,6 +82,19 @@ time_bucket_sort_transform(FuncExpr *func)
 		return (Expr *) func;
 
 	return (Expr *) copyObject(second);
+}
+
+static Expr *
+time_bucket_sort_transform(FuncExpr *func)
+{
+	Assert(list_length(func->args) >= 2);
+	/*
+	 * If period and offset are not constants we must not do the optimization
+	 */
+	if (!time_bucket_has_const_period_and_offset(func))
+		return (Expr *) func;
+
+	return time_bucket_gapfill_sort_transform(func);
 }
 
 /* For time_bucket this estimate currently works by seeing how many possible
@@ -266,6 +272,62 @@ static FuncInfo funcinfo[] = {
 		.group_estimate = time_bucket_group_estimate,
 		.sort_transform = time_bucket_sort_transform,
 	},
+
+	{
+		.is_timescaledb_func = true,
+		.is_bucketing_func = true,
+		.funcname = "time_bucket_gapfill",
+		.nargs = 4,
+		.arg_types = { INTERVALOID, TIMESTAMPOID, TIMESTAMPOID, TIMESTAMPOID },
+		.group_estimate = time_bucket_group_estimate,
+		.sort_transform = time_bucket_gapfill_sort_transform, //TODO change transform fn
+	},
+	{
+		.is_timescaledb_func = true,
+		.is_bucketing_func = true,
+		.funcname = "time_bucket_gapfill",
+		.nargs = 4,
+		.arg_types = { INTERVALOID, TIMESTAMPTZOID, TIMESTAMPTZOID, TIMESTAMPTZOID },
+		.group_estimate = time_bucket_group_estimate,
+		.sort_transform = time_bucket_gapfill_sort_transform,
+	},
+	{
+		.is_timescaledb_func = true,
+		.is_bucketing_func = true,
+		.funcname = "time_bucket_gapfill",
+		.nargs = 4,
+		.arg_types = { INTERVALOID, DATEOID, DATEOID, DATEOID },
+		.group_estimate = time_bucket_group_estimate,
+		.sort_transform = time_bucket_gapfill_sort_transform,
+	},
+	{
+		.is_timescaledb_func = true,
+		.is_bucketing_func = true,
+		.funcname = "time_bucket_gapfill",
+		.nargs = 4,
+		.arg_types = { INT2OID, INT2OID, INT2OID, INT2OID },
+		.group_estimate = time_bucket_group_estimate,
+		.sort_transform = time_bucket_gapfill_sort_transform,
+	},
+	{
+		.is_timescaledb_func = true,
+		.is_bucketing_func = true,
+		.funcname = "time_bucket_gapfill",
+		.nargs = 4,
+		.arg_types = { INT4OID, INT4OID, INT4OID, INT4OID },
+		.group_estimate = time_bucket_group_estimate,
+		.sort_transform = time_bucket_gapfill_sort_transform,
+	},
+	{
+		.is_timescaledb_func = true,
+		.is_bucketing_func = true,
+		.funcname = "time_bucket_gapfill",
+		.nargs = 4,
+		.arg_types = { INT8OID, INT8OID, INT8OID, INT8OID },
+		.group_estimate = time_bucket_group_estimate,
+		.sort_transform = time_bucket_gapfill_sort_transform,
+	},
+
 	{
 		.is_timescaledb_func = false,
 		.is_bucketing_func = true,

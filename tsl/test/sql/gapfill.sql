@@ -962,6 +962,15 @@ SELECT
   )
 FROM metrics_tstz WHERE time < '2017-01-01' GROUP BY 1;
 
+SELECT
+  time_bucket_gapfill('12h'::interval,time,'2017-01-01'::timestamptz, '2017-01-02'::timestamptz),
+  interpolate(
+    avg(v1),
+    (SELECT ('2017-01-01'::timestamptz,1::float)),
+    (SELECT ('2017-01-02'::timestamptz,2::float))
+  )
+FROM metrics_tstz WHERE time_bucket_gapfill('12h'::interval,time,'2017-01-01'::timestamptz, '2017-01-02'::timestamptz) < '2017-01-01' GROUP BY 1;
+
 -- interpolation with correlated subquery lookup before interval
 SELECT
   time_bucket_gapfill('1h'::interval,time,'2018-01-01 3:00 PST'::timestamptz, '2018-01-01 8:00 PST'::timestamptz),
