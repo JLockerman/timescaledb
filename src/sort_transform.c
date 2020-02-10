@@ -306,6 +306,13 @@ sort_transform_ec(PlannerInfo *root, EquivalenceClass *orig)
 				 * new EC to the children ourselves
 				 */
 				propagate_to_children = orig->ec_has_volatile;
+				/* even though time_bucket_gapfill is marked as VOLATILE to
+				 * prevent the planner from removing the call, it's still safe
+				 * to use values from child tables in lieu of the output of the
+				 * root table. Among other things, this allows us to use the
+				 * sort-order from the child tables for the output
+				 */
+				orig->ec_has_volatile = false;
 			}
 			newec->ec_members = lappend(newec->ec_members, em);
 		}

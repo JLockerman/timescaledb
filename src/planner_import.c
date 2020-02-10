@@ -37,7 +37,6 @@
 
 #include "planner_import.h"
 #include "compat.h"
-#include "func_cache.h"
 
 #if (PG11 && PG_VERSION_NUM >= 110002) || (PG10 && PG_VERSION_NUM >= 100007) ||                    \
 	(PG96 && PG_VERSION_NUM >= 90612)
@@ -759,22 +758,6 @@ ts_make_sort_from_pathkeys(Plan *lefttree, List *pathkeys, Relids relids)
 	return make_sort(lefttree, numsortkeys, sortColIdx, sortOperators, collations, nullsFirst);
 }
 
-static TargetEntry *
-try_get_sortgroupref_tle(Index sortref, List *targetList)
-{
-	ListCell   *l;
-
-	foreach(l, targetList)
-	{
-		TargetEntry *tle = (TargetEntry *) lfirst(l);
-
-		if (tle->ressortgroupref == sortref)
-			return tle;
-	}
-
-	return NULL;
-}
-
 /*
  * prepare_sort_from_pathkeys
  *	  Prepare to sort according to given pathkeys
@@ -858,84 +841,68 @@ ts_prepare_sort_from_pathkeys(Plan *lefttree, List *pathkeys, Relids relids,
 			/*
 			 * If the pathkey's EquivalenceClass is volatile, then it must
 			 * have come from an ORDER BY clause, and we have to match it to
-			 * that same targetlist entry, unless it's a time_bucket_gapfill
+			 * that same targetlist entry.
 			 */
 			if (ec->ec_sortref == 0) /* can't happen */
 				elog(ERROR, "volatile EquivalenceClass has no sortref");
-			tle = try_get_sortgroupref_tle(ec->ec_sortref, tlist);
-			if (tle == NULL)
-			{
-				EquivalenceMember *member = linitial(ec->ec_members);
-				if(!(IsA(member->em_expr, FuncExpr) && ts_func_cache_get_bucketing_func(castNode(FuncExpr, member->em_expr)->funcid)))
-					elog(ERROR, "ORDER/GROUP BY expression for VOLATILE not found in targetlist");
-			}
+			tle = get_sortgroupref_tle(ec->ec_sortref, tlist);
+			Assert(tle);
+			Assert(list_length(ec->ec_members) == 1);
 			pk_datatype = ((EquivalenceMember *) linitial(ec->ec_members))->em_datatype;
 		}
-
-		/* if tle is non-null, we must have found the TargetEntry for a VOLATILE
-		 * Pathkey. If we didn't find one, it could be because it is a bucketing
-		 * function, in which case we push down the ordering anyway, so treat it
-		 * like the other cases. Other VOLATILE pathkeys which lack a TargetEntry
-		 * will fail at the elog(ERROR, ...) above.
-		 */
-		if (tle == NULL)
+		else if (reqColIdx != NULL)
 		{
-			if (reqColIdx != NULL)
+			/*
+			 * If we are given a sort column number to match, only consider
+			 * the single TLE at that position.  It's possible that there is
+			 * no such TLE, in which case fall through and generate a resjunk
+			 * targetentry (we assume this must have happened in the parent
+			 * plan as well).  If there is a TLE but it doesn't match the
+			 * pathkey's EC, we do the same, which is probably the wrong thing
+			 * but we'll leave it to caller to complain about the mismatch.
+			 */
+			tle = get_tle_by_resno(tlist, reqColIdx[numsortkeys]);
+			if (tle)
 			{
-				/*
-				* If we are given a sort column number to match, only consider
-				* the single TLE at that position.  It's possible that there is
-				* no such TLE, in which case fall through and generate a resjunk
-				* targetentry (we assume this must have happened in the parent
-				* plan as well).  If there is a TLE but it doesn't match the
-				* pathkey's EC, we do the same, which is probably the wrong thing
-				* but we'll leave it to caller to complain about the mismatch.
-				*/
-				tle = get_tle_by_resno(tlist, reqColIdx[numsortkeys]);
-				if (tle)
+				em = find_ec_member_for_tle(ec, tle, relids);
+				if (em)
 				{
-					em = find_ec_member_for_tle(ec, tle, relids);
-					if (em)
-					{
-						/* found expr at right place in tlist */
-						pk_datatype = em->em_datatype;
-					}
-					else if (IsA(tle->expr, FuncExpr) && ts_func_cache_get_bucketing_func(castNode(FuncExpr, tle->expr)->funcid))
-						pk_datatype = castNode(FuncExpr, tle->expr)->funcresulttype;
-					else
-						tle = NULL;
+					/* found expr at right place in tlist */
+					pk_datatype = em->em_datatype;
 				}
-			}
-			else
-			{
-				/*
-				* Otherwise, we can sort by any non-constant expression listed in
-				* the pathkey's EquivalenceClass.  For now, we take the first
-				* tlist item found in the EC. If there's no match, we'll generate
-				* a resjunk entry using the first EC member that is an expression
-				* in the input's vars.  (The non-const restriction only matters
-				* if the EC is below_outer_join; but if it isn't, it won't
-				* contain consts anyway, else we'd have discarded the pathkey as
-				* redundant.)
-				*
-				* XXX if we have a choice, is there any way of figuring out which
-				* might be cheapest to execute?  (For example, int4lt is likely
-				* much cheaper to execute than numericlt, but both might appear
-				* in the same equivalence class...)  Not clear that we ever will
-				* have an interesting choice in practice, so it may not matter.
-				*/
-				foreach (j, tlist)
-				{
-					tle = (TargetEntry *) lfirst(j);
-					em = find_ec_member_for_tle(ec, tle, relids);
-					if (em)
-					{
-						/* found expr already in tlist */
-						pk_datatype = em->em_datatype;
-						break;
-					}
+				else
 					tle = NULL;
+			}
+		}
+		else
+		{
+			/*
+			 * Otherwise, we can sort by any non-constant expression listed in
+			 * the pathkey's EquivalenceClass.  For now, we take the first
+			 * tlist item found in the EC. If there's no match, we'll generate
+			 * a resjunk entry using the first EC member that is an expression
+			 * in the input's vars.  (The non-const restriction only matters
+			 * if the EC is below_outer_join; but if it isn't, it won't
+			 * contain consts anyway, else we'd have discarded the pathkey as
+			 * redundant.)
+			 *
+			 * XXX if we have a choice, is there any way of figuring out which
+			 * might be cheapest to execute?  (For example, int4lt is likely
+			 * much cheaper to execute than numericlt, but both might appear
+			 * in the same equivalence class...)  Not clear that we ever will
+			 * have an interesting choice in practice, so it may not matter.
+			 */
+			foreach (j, tlist)
+			{
+				tle = (TargetEntry *) lfirst(j);
+				em = find_ec_member_for_tle(ec, tle, relids);
+				if (em)
+				{
+					/* found expr already in tlist */
+					pk_datatype = em->em_datatype;
+					break;
 				}
+				tle = NULL;
 			}
 		}
 
