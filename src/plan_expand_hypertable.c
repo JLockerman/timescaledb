@@ -84,46 +84,13 @@ is_chunk_exclusion_func(Expr *node)
 }
 
 static bool
-is_time_bucket_function(FuncExpr *node)
+is_time_bucket_function(Expr *node)
 {
-	if (IsA(node, FuncExpr))
-	{
-		char *fn_name = get_func_name(castNode(FuncExpr, node)->funcid);
-		return strncmp(fn_name, "time_bucket", NAMEDATALEN) == 0;
-	}
+	if (IsA(node, FuncExpr) &&
+		strncmp(get_func_name(castNode(FuncExpr, node)->funcid), "time_bucket", NAMEDATALEN) == 0)
+		return true;
 
 	return false;
-}
-
-static bool
-is_time_bucket_gapfill_function(FuncExpr *node)
-{
-	if (IsA(node, FuncExpr))
-	{
-		char *fn_name = get_func_name(castNode(FuncExpr, node)->funcid);
-		return strncmp(fn_name, "time_bucket_gapfill", NAMEDATALEN) == 0;
-	}
-
-	return false;
-}
-
-static bool
-can_transform_time_bucket_comparison(Expr *left, Expr *right)
-{
-	FuncExpr *function;
-	if (IsA(left, FuncExpr) && IsA(right, Const))
-		function = castNode(FuncExpr, left);
-	else if (IsA(left, Const) && IsA(right, FuncExpr))
-		function = castNode(FuncExpr, right);
-	else
-		return false;
-
-	if (list_length(function->args) == 2)
-		return is_time_bucket_function(function);
-	else if (list_length(function->args) == 4)
-		return is_time_bucket_gapfill_function(function);
-	else
-		return false;
 }
 
 static int64
@@ -197,9 +164,8 @@ transform_time_bucket_comparison(PlannerInfo *root, OpExpr *op)
 	TypeCacheEntry *tce;
 	int strategy;
 
-	/* caller must ensure time_bucket only has 2 arguments,
-	 * time_bucket_gapfill can have more
-	 */
+	/* caller must ensure time_bucket only has 2 arguments */
+	Assert(list_length(time_bucket->args) == 2);
 
 	/*
 	 * if time_bucket call is on wrong side we switch operator
@@ -513,7 +479,12 @@ process_quals(Node *quals, CollectQualCtx *ctx)
 			 * check for time_bucket comparisons
 			 * time_bucket(Const, time_colum) > Const
 			 */
-			if (can_transform_time_bucket_comparison(left, right))
+			if ((IsA(left, FuncExpr) && IsA(right, Const) &&
+				 list_length(castNode(FuncExpr, left)->args) == 2 &&
+				 is_time_bucket_function(left)) ||
+				(IsA(left, Const) && IsA(right, FuncExpr) &&
+				 list_length(castNode(FuncExpr, right)->args) == 2 &&
+				 is_time_bucket_function(right)))
 			{
 				qual = (Expr *) transform_time_bucket_comparison(ctx->root, op);
 				/*

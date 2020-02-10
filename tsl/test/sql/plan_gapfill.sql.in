@@ -135,22 +135,3 @@ GROUP BY 1
 ORDER BY 1;
 
 RESET max_parallel_workers_per_gather;
-
--- test index optimization
-:EXPLAIN SELECT time_bucket_gapfill('5m',time) bucket, value
-FROM gapfill_plan_test
-WHERE time_bucket_gapfill('5m',time,to_timestamp(0),to_timestamp(0)) >= '2018-02-01'::timestamptz;
-
--- test index optimization with locf
-:EXPLAIN SELECT time_bucket_gapfill('5m',time,to_timestamp(0),to_timestamp(0)) bucket, locf(avg(value))
-FROM gapfill_plan_test
-WHERE time_bucket_gapfill('5m',time,to_timestamp(0),to_timestamp(0)) >= '2018-02-01'::timestamptz
-GROUP BY 1
-ORDER BY 1;
-
--- test index optimization with interpolate
-:EXPLAIN SELECT time_bucket_gapfill('5m',time,to_timestamp(0),to_timestamp(0)) bucket, interpolate(avg(value))
-FROM gapfill_plan_test
-WHERE time_bucket_gapfill('5m',time,to_timestamp(0),to_timestamp(0)) >= '2018-02-01'::timestamptz
-GROUP BY 1
-ORDER BY 1;
