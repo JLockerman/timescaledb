@@ -7,14 +7,42 @@
 #define TIMESCALEDB_TSL_NODES_SKIP_SKAN_PLANNER_H
 
 #include <postgres.h>
+#include <access/relscan.h>
+#include <access/skey.h>
+#include <nodes/execnodes.h>
 #include <optimizer/planner.h>
+
+typedef struct SkipSkanState
+{
+	CustomScanState cscan_state;
+	ExprState *recheck_state;
+	IndexScanDesc scan_desc;
+	ScanKey scan_keys;
+	int num_scan_keys;
+	int num_distinct_cols;
+	int max_distinct_col;
+	int *distinc_col_attnums;
+	Datum *prev_vals;
+	bool *prev_is_null;
+	bool found_first;
+	bool needs_rescan;
+	bool index_only_scan;
+
+	Relation index_rel;
+	void *idx;
+	void *idx_scan;
+} SkipSkanState;
+
 
 typedef struct SkipSkanPath
 {
-    CustomPath cpath;
-    IndexPath *index_path;
-    int num_distinct_cols;
-    Oid *comparison_operators;
+	CustomPath cpath;
+	IndexPath *index_path;
+	int num_distinct_cols;
+	/* list of index clauses (RestricInfo *) which we'll use to skip past elements we've already seen */
+	List *comparison_clauses;
+	List *comparison_columns;
+	int *comparison_table_attnums;
 } SkipSkanPath;
 
 void ts_add_skip_skan_paths(PlannerInfo *root, RelOptInfo *output_rel);
