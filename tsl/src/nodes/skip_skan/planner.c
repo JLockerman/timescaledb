@@ -22,10 +22,12 @@
 #include <optimizer/planner.h>
 #include <optimizer/restrictinfo.h>
 #include <optimizer/tlist.h>
+#include <utils/datum.h>
 #include <utils/lsyscache.h>
 #include <utils/syscache.h>
 #include <parser/parse_func.h>
 
+#include "guc.h"
 #include "license.h"
 #include "nodes/skip_skan/planner.h"
 
@@ -51,6 +53,7 @@ skip_skan_begin(CustomScanState *node, EState *estate, int eflags)
 	}
 	else if(IsA(state->idx_scan, IndexOnlyScan))
 	{
+		//FIXME impl pending
 		elog(ERROR, "impl pending");
 		IndexOnlyScanState *idx = ExecInitIndexOnlyScan(state->idx_scan, estate, eflags);
 		state->idx = idx;
@@ -145,17 +148,21 @@ skip_skan_exec(CustomScanState *node)
 		for(int i = 0; i < state->num_distinct_cols; i++)
 		{
 			int col = state->distinc_col_attnums[i];
-			if (!state->prev_is_null[i])
+			if (!state->prev_is_null[i] && !state->distinct_by_val[i])
 			{
-				//FIXME free old value
+				pfree(DatumGetPointer(state->prev_vals[i]));
 			}
-			//FIXME copy into correct memory context
-			state->prev_vals[i] = slot_getattr(slot, col, &state->prev_is_null[i]);
+
+			MemoryContext old_ctx = MemoryContextSwitchTo(state->ctx);
+			state->prev_vals[i] = datumCopy(slot_getattr(slot, col, &state->prev_is_null[i]),
+				state->distinct_by_val[i],
+				state->distinct_typ_len[i]);
 			state->scan_keys[i].sk_argument = state->prev_vals[i];
 			if (state->prev_is_null[i])
 				state->scan_keys[i].sk_flags |= SK_ISNULL;
 			else
 				state->scan_keys[i].sk_flags &= ~SK_ISNULL;
+			MemoryContextSwitchTo(old_ctx);
 		}
 
 		//FIXME handle NULLs
@@ -217,14 +224,23 @@ skip_skan_state_create(CustomScan *cscan)
 	int max_distinct_col = 0;
 	SkipSkanState *state = (SkipSkanState *) newNode(sizeof(SkipSkanState), T_CustomScanState);
 	state->num_distinct_cols = (int)linitial(cscan->custom_private);
+
 	state->idx_scan = lsecond(cscan->custom_private);
+
 	state->distinc_col_attnums = lthird(cscan->custom_private);
+
 	for(col = 0; col < state->num_distinct_cols; col++)
 	{
 		if (state->distinc_col_attnums[col] > max_distinct_col)
 			max_distinct_col = state->distinc_col_attnums[col];
 	}
+
 	state->max_distinct_col = max_distinct_col;
+
+	state->distinct_by_val = lfourth(cscan->custom_private);
+
+	state->distinct_typ_len = lfirst(lnext(lnext(lnext(lnext(list_head(cscan->custom_private))))));
+
 	state->cscan_state.methods = &skip_skan_state_methods;
 	return (Node *)state;
 }
@@ -269,6 +285,8 @@ skip_skan_plan_create(PlannerInfo *root, RelOptInfo *relopt, CustomPath *best_pa
 	skip_plan->custom_private = lappend(skip_plan->custom_private, num_skip_clauses);
 	skip_plan->custom_private = lappend(skip_plan->custom_private, plan);
 	skip_plan->custom_private = lappend(skip_plan->custom_private, path->comparison_table_attnums);
+	skip_plan->custom_private = lappend(skip_plan->custom_private, path->distinct_by_val);
+	skip_plan->custom_private = lappend(skip_plan->custom_private, path->distinct_typ_len);
 	return &skip_plan->scan.plan;
 }
 
@@ -280,6 +298,8 @@ static CustomPathMethods skip_skan_path_methods = {
 void
 ts_add_skip_skan_paths(PlannerInfo *root, RelOptInfo *output_rel)
 {
+	if (!ts_guc_enable_skip_skan)
+		return;
 	ListCell *lc;
 	List *pathlist = output_rel->pathlist;
 	foreach (lc, pathlist)
@@ -309,24 +329,26 @@ ts_add_skip_skan_paths(PlannerInfo *root, RelOptInfo *output_rel)
 		if (index_path->indexorderbys != NIL)
 			continue;
 
-
+		int num_distinct_cols = unique_path->numkeys;
 		skip_skan_path = palloc0(sizeof(*skip_skan_path));
 		skip_skan_path->cpath.path = unique_path->path;
 		skip_skan_path->cpath.path.type = T_CustomPath;
 		skip_skan_path->cpath.path.pathtype = T_CustomScan;
 		skip_skan_path->cpath.methods = &skip_skan_path_methods;
 		skip_skan_path->index_path = index_path;
-		skip_skan_path->num_distinct_cols = unique_path->numkeys;
+		skip_skan_path->num_distinct_cols = num_distinct_cols;
 		skip_skan_path->comparison_clauses = NIL;
-		skip_skan_path->comparison_table_attnums = palloc(sizeof(*skip_skan_path->comparison_table_attnums) *skip_skan_path->num_distinct_cols);
-		Assert(skip_skan_path->num_distinct_cols <= index_path->indexinfo->nkeycolumns);
+		skip_skan_path->comparison_table_attnums = palloc(sizeof(*skip_skan_path->comparison_table_attnums) * num_distinct_cols);
+		skip_skan_path->distinct_by_val = palloc(sizeof(*skip_skan_path->distinct_by_val) * num_distinct_cols);
+		skip_skan_path->distinct_typ_len = palloc(sizeof(*skip_skan_path->distinct_typ_len) * num_distinct_cols);
+		Assert(num_distinct_cols <= index_path->indexinfo->nkeycolumns);
 
 		IndexOptInfo *idx_info = index_path->indexinfo;
 		Index rel_index = idx_info->rel->relid;
 		Oid rel_oid = root->simple_rte_array[rel_index]->relid;
 
 		/* find the ordering operator we'll use to skip around each key column */
-		for(col = 0; col < skip_skan_path->num_distinct_cols; col++)
+		for(col = 0; col < num_distinct_cols; col++)
 		{
 			IndexOptInfo *idx_info = index_path->indexinfo;
 			/* this is a bit of a hack: the Unique node will deduplicate based
@@ -351,6 +373,9 @@ ts_add_skip_skan_paths(PlannerInfo *root, RelOptInfo *output_rel)
 			Oid column_type = att_tup->atttypid;
 			int32 column_typmod = att_tup->atttypmod;
 			Oid column_collation = att_tup->attcollation;
+
+			skip_skan_path->distinct_by_val[col] = att_tup->attbyval;
+			skip_skan_path->distinct_typ_len[col] = att_tup->attlen;
 			ReleaseSysCache(column_tuple);
 			if(!OidIsValid(column_type))
 				goto next_index; /* cannot use this index */
@@ -394,5 +419,4 @@ ts_add_skip_skan_paths(PlannerInfo *root, RelOptInfo *output_rel)
 		return;
 next_index:;
 	}
-
 }

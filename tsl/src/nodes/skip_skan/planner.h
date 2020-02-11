@@ -17,11 +17,14 @@ typedef struct SkipSkanState
 	CustomScanState cscan_state;
 	ExprState *recheck_state;
 	IndexScanDesc scan_desc;
+	MemoryContext ctx;
 	ScanKey scan_keys;
 	int num_scan_keys;
 	int num_distinct_cols;
 	int max_distinct_col;
 	int *distinc_col_attnums;
+	bool *distinct_by_val;
+	int *distinct_typ_len;
 	Datum *prev_vals;
 	bool *prev_is_null;
 	bool found_first;
@@ -43,6 +46,8 @@ typedef struct SkipSkanPath
 	List *comparison_clauses;
 	List *comparison_columns;
 	int *comparison_table_attnums;
+	bool *distinct_by_val;
+	int *distinct_typ_len;
 } SkipSkanPath;
 
 void ts_add_skip_skan_paths(PlannerInfo *root, RelOptInfo *output_rel);
