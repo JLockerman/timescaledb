@@ -6,6 +6,7 @@
 
 #include <postgres.h>
 #include <access/htup_details.h>
+#include <access/visibilitymap.h>
 #include <catalog/pg_type.h>
 #include <executor/nodeIndexscan.h>
 #include <executor/nodeIndexOnlyscan.h>
@@ -22,6 +23,7 @@
 #include <optimizer/planner.h>
 #include <optimizer/restrictinfo.h>
 #include <optimizer/tlist.h>
+#include <storage/predicate.h>
 #include <utils/datum.h>
 #include <utils/lsyscache.h>
 #include <utils/syscache.h>
@@ -43,6 +45,7 @@ skip_skan_begin(CustomScanState *node, EState *estate, int eflags)
 		state->num_scan_keys = idx->iss_NumScanKeys;
 		state->index_rel = idx->iss_RelationDesc;
 		state->recheck_state = idx->indexqualorig;
+		state->index_only_buffer = NULL;
 		state->index_only_scan = false;
 		if (idx->iss_NumOrderByKeys > 0)
 			elog(ERROR, "cannot SkipSkan with OrderByKeys");
@@ -53,8 +56,6 @@ skip_skan_begin(CustomScanState *node, EState *estate, int eflags)
 	}
 	else if(IsA(state->idx_scan, IndexOnlyScan))
 	{
-		//FIXME impl pending
-		elog(ERROR, "impl pending");
 		IndexOnlyScanState *idx = ExecInitIndexOnlyScan(state->idx_scan, estate, eflags);
 		state->idx = idx;
 		state->scan_keys = idx->ioss_ScanKeys;
@@ -62,6 +63,7 @@ skip_skan_begin(CustomScanState *node, EState *estate, int eflags)
 		state->index_rel = idx->ioss_RelationDesc;
 		state->recheck_state = idx->indexqual;
 		state->index_only_scan = true;
+		state->index_only_buffer = &idx->ioss_VMBuffer;
 		if (idx->ioss_NumOrderByKeys > 0)
 			elog(ERROR, "cannot SkipSkan with OrderByKeys");
 
@@ -79,6 +81,9 @@ skip_skan_begin(CustomScanState *node, EState *estate, int eflags)
 	state->found_first = false;
 	state->needs_rescan = false;
 }
+
+static TupleTableSlot *index_skip_skan(SkipSkanState *state);
+static TupleTableSlot *index_only_skip_skan(SkipSkanState *state);
 
 static TupleTableSlot *
 skip_skan_exec(CustomScanState *node)
@@ -98,6 +103,12 @@ skip_skan_exec(CustomScanState *node)
 			nkeys,
 			0 /*norderbys*/);
 
+		if (state->index_only_scan)
+		{
+			state->scan_desc->xs_want_itup = true;
+			*state->index_only_buffer = InvalidBuffer;
+		}
+
 		index_rescan(state->scan_desc,
 			/* ignore the first scan keys, which are used for skipping */
 			state->scan_keys + state->num_distinct_cols,
@@ -115,6 +126,19 @@ skip_skan_exec(CustomScanState *node)
 			0 /*norderbys*/);;
 	}
 
+	if (state->index_only_scan)
+		return index_only_skip_skan(state);
+	else
+		return index_skip_skan(state);
+}
+
+static void update_skip_key(SkipSkanState *state, TupleTableSlot *slot);
+
+/* based on IndexNext */
+static TupleTableSlot *
+index_skip_skan(SkipSkanState *state)
+{
+	CustomScanState *node = &state->cscan_state;
 	TupleTableSlot *slot = node->ss.ss_ScanTupleSlot;
 	ExprContext *econtext = node->ss.ps.ps_ExprContext;
 	HeapTuple tuple;
@@ -144,48 +168,162 @@ skip_skan_exec(CustomScanState *node)
 			}
 		}
 
-		slot_getsomeattrs(slot, state->max_distinct_col);
-		for(int i = 0; i < state->num_distinct_cols; i++)
-		{
-			int col = state->distinc_col_attnums[i];
-			if (!state->prev_is_null[i] && !state->distinct_by_val[i])
-			{
-				pfree(DatumGetPointer(state->prev_vals[i]));
-			}
-
-			MemoryContext old_ctx = MemoryContextSwitchTo(state->ctx);
-			state->prev_vals[i] = datumCopy(slot_getattr(slot, col, &state->prev_is_null[i]),
-				state->distinct_by_val[i],
-				state->distinct_typ_len[i]);
-			state->scan_keys[i].sk_argument = state->prev_vals[i];
-			if (state->prev_is_null[i])
-				state->scan_keys[i].sk_flags |= SK_ISNULL;
-			else
-				state->scan_keys[i].sk_flags &= ~SK_ISNULL;
-			MemoryContextSwitchTo(old_ctx);
-		}
-
-		//FIXME handle NULLs
-		if (!state->found_first)
-		{
-			index_endscan(state->scan_desc);
-			state->scan_desc = index_beginscan(node->ss.ss_currentRelation,
-				state->index_rel,
-				estate->es_snapshot,
-				state->num_scan_keys,
-				0 /*norderbys*/);
-			state->found_first = true;
-		}
-
-		//FIXME state->needs_rescan = !all_null?
-		state->needs_rescan = true;
+		update_skip_key(state, slot);
 
 		return slot;
 	}
 
 	return NULL;
-	// elog(ERROR, "unimplemented");
 }
+
+static void StoreIndexTuple(TupleTableSlot *slot, IndexTuple itup, TupleDesc itupdesc);
+
+/* based on IndexOnlyNext */
+static TupleTableSlot *
+index_only_skip_skan(SkipSkanState *state)
+{
+	CustomScanState *node = &state->cscan_state;
+	TupleTableSlot *slot = node->ss.ss_ScanTupleSlot;
+	ExprContext *econtext = node->ss.ps.ps_ExprContext;
+	ItemPointer tid;
+
+	//FIXME get scan dir from interior plan
+	while ((tid = index_getnext_tid(state->scan_desc, ForwardScanDirection)) != NULL)
+	{
+		HeapTuple tuple = NULL;
+		CHECK_FOR_INTERRUPTS();
+
+		/* see https://github.com/postgres/postgres/blob/34f805c8cf1bc4d54075526d3b023d9194ccd2cd/src/backend/executor/nodeIndexonlyscan.c#L125 for comments*/
+
+		if (!VM_ALL_VISIBLE(state->scan_desc->heapRelation,
+				ItemPointerGetBlockNumber(tid), state->index_only_buffer))
+		{
+			/*
+			 * Rats, we have to visit the heap to check visibility.
+			 */
+			InstrCountTuples2(node, 1);
+			tuple = index_fetch_heap(state->scan_desc);
+			if (tuple == NULL)
+				continue;		/* no visible tuple, try next index entry */
+
+			if (state->scan_desc->xs_continue_hot)
+				elog(ERROR, "non-MVCC snapshots are not supported in index-only scans");
+		}
+
+		if (state->scan_desc->xs_hitup)
+		{
+			/*
+			 * We don't take the trouble to verify that the provided tuple has
+			 * exactly the slot's format, but it seems worth doing a quick
+			 * check on the number of fields.
+			 */
+			Assert(slot->tts_tupleDescriptor->natts ==
+				   state->scan_desc->xs_hitupdesc->natts);
+			ExecStoreTuple(state->scan_desc->xs_hitup, slot, InvalidBuffer, false);
+		}
+		else if (state->scan_desc->xs_itup)
+			StoreIndexTuple(slot, state->scan_desc->xs_itup, state->scan_desc->xs_itupdesc);
+		else
+			elog(ERROR, "no data returned for index-only scan");
+
+		 /*
+          * If the index was lossy, we have to recheck the index quals using
+          * the fetched tuple.
+          */
+		if (state->scan_desc->xs_recheck)
+		{
+			econtext->ecxt_scantuple = slot;
+			if (!ExecQualAndReset(state->recheck_state, econtext))
+			{
+				/* Fails recheck, so drop it and loop back for another */
+				InstrCountFiltered2(node, 1);
+				continue;
+			}
+		}
+
+		if (tuple == NULL)
+			PredicateLockPage(state->scan_desc->heapRelation,
+							  ItemPointerGetBlockNumber(tid),
+							  state->cscan_state.ss.ps.state->es_snapshot);
+
+		update_skip_key(state, slot);
+
+		return slot;
+	}
+
+	return NULL;
+}
+
+static void
+StoreIndexTuple(TupleTableSlot *slot, IndexTuple itup, TupleDesc itupdesc)
+{
+	int			nindexatts = itupdesc->natts;
+	Datum	   *values = slot->tts_values;
+	bool	   *isnull = slot->tts_isnull;
+	int			i;
+
+	/*
+	 * Note: we must use the tupdesc supplied by the AM in index_getattr, not
+	 * the slot's tupdesc, in case the latter has different datatypes (this
+	 * happens for btree name_ops in particular).  They'd better have the same
+	 * number of columns though, as well as being datatype-compatible which is
+	 * something we can't so easily check.
+	 */
+	Assert(slot->tts_tupleDescriptor->natts == nindexatts);
+
+	ExecClearTuple(slot);
+	for (i = 0; i < nindexatts; i++)
+		values[i] = index_getattr(itup, i + 1, itupdesc, &isnull[i]);
+	ExecStoreVirtualTuple(slot);
+}
+
+static void
+update_skip_key(SkipSkanState *state, TupleTableSlot *slot)
+{
+	CustomScanState *node = &state->cscan_state;
+	EState	   *estate = node->ss.ps.state;
+	slot_getsomeattrs(slot, state->max_distinct_col);
+	for(int i = 0; i < state->num_distinct_cols; i++)
+	{
+		int col = state->distinc_col_attnums[i];
+		if (!state->prev_is_null[i] && !state->distinct_by_val[i])
+		{
+			pfree(DatumGetPointer(state->prev_vals[i]));
+		}
+
+		MemoryContext old_ctx = MemoryContextSwitchTo(state->ctx);
+		state->prev_vals[i] = datumCopy(slot_getattr(slot, col, &state->prev_is_null[i]),
+			state->distinct_by_val[i],
+			state->distinct_typ_len[i]);
+		state->scan_keys[i].sk_argument = state->prev_vals[i];
+		if (state->prev_is_null[i])
+			state->scan_keys[i].sk_flags |= SK_ISNULL;
+		else
+			state->scan_keys[i].sk_flags &= ~SK_ISNULL;
+		MemoryContextSwitchTo(old_ctx);
+	}
+
+	//FIXME handle NULLs
+	if (!state->found_first)
+	{
+		index_endscan(state->scan_desc);
+		state->scan_desc = index_beginscan(node->ss.ss_currentRelation,
+			state->index_rel,
+			estate->es_snapshot,
+			state->num_scan_keys,
+			0 /*norderbys*/);
+		if (state->index_only_scan)
+		{
+			state->scan_desc->xs_want_itup = true;
+			*state->index_only_buffer = InvalidBuffer;
+		}
+		state->found_first = true;
+	}
+
+	//FIXME state->needs_rescan = !all_null?
+	state->needs_rescan = true;
+}
+
 
 static void
 skip_skan_end(CustomScanState *node)
@@ -223,11 +361,11 @@ skip_skan_state_create(CustomScan *cscan)
 	int col = 0;
 	int max_distinct_col = 0;
 	SkipSkanState *state = (SkipSkanState *) newNode(sizeof(SkipSkanState), T_CustomScanState);
+
+	state->idx_scan = linitial(cscan->custom_plans);
+
 	state->num_distinct_cols = (int)linitial(cscan->custom_private);
-
-	state->idx_scan = lsecond(cscan->custom_private);
-
-	state->distinc_col_attnums = lthird(cscan->custom_private);
+	state->distinc_col_attnums = lsecond(cscan->custom_private);
 
 	for(col = 0; col < state->num_distinct_cols; col++)
 	{
@@ -237,9 +375,9 @@ skip_skan_state_create(CustomScan *cscan)
 
 	state->max_distinct_col = max_distinct_col;
 
-	state->distinct_by_val = lfourth(cscan->custom_private);
+	state->distinct_by_val = lthird(cscan->custom_private);
 
-	state->distinct_typ_len = lfirst(lnext(lnext(lnext(lnext(list_head(cscan->custom_private))))));
+	state->distinct_typ_len = lfourth(cscan->custom_private);
 
 	state->cscan_state.methods = &skip_skan_state_methods;
 	return (Node *)state;
@@ -264,6 +402,7 @@ skip_skan_plan_create(PlannerInfo *root, RelOptInfo *relopt, CustomPath *best_pa
 	index_path->indexqualcols = list_concat(path->comparison_columns, index_path->indexqualcols);
 
 	Plan *plan = create_plan(root, &index_path->path);
+
 	if (IsA(plan, IndexScan))
 	{
 		IndexScan *idx_plan = castNode(IndexScan, plan);
@@ -277,13 +416,15 @@ skip_skan_plan_create(PlannerInfo *root, RelOptInfo *relopt, CustomPath *best_pa
 	else
 		elog(ERROR, "bad plan");
 
+	skip_plan->custom_scan_tlist = plan->targetlist;
 	skip_plan->scan.plan.qual = NIL;
 	skip_plan->scan.plan.type = T_CustomScan;
 	skip_plan->scan.plan.parallel_safe = false;
 	skip_plan->scan.plan.parallel_aware = false;
 	skip_plan->methods = &skip_skan_plan_methods;
+	skip_plan->custom_plans = list_make1(plan);
 	skip_plan->custom_private = lappend(skip_plan->custom_private, num_skip_clauses);
-	skip_plan->custom_private = lappend(skip_plan->custom_private, plan);
+	// skip_plan->custom_private = lappend(skip_plan->custom_private, plan);
 	skip_plan->custom_private = lappend(skip_plan->custom_private, path->comparison_table_attnums);
 	skip_plan->custom_private = lappend(skip_plan->custom_private, path->distinct_by_val);
 	skip_plan->custom_private = lappend(skip_plan->custom_private, path->distinct_typ_len);
@@ -319,6 +460,9 @@ ts_add_skip_skan_paths(PlannerInfo *root, RelOptInfo *output_rel)
 			continue;
 
 		index_path = castNode(IndexPath, unique_path->subpath);
+
+		// if (index_path->path.pathtype == T_IndexOnlyScan)
+		// 	continue;
 
 		if(index_path->indexinfo->sortopfamily == NULL)
 			continue; /* non-orderable index, skip these for now */
@@ -406,7 +550,15 @@ ts_add_skip_skan_paths(PlannerInfo *root, RelOptInfo *output_rel)
 			RestrictInfo *clause = make_simple_restrictinfo(comparsion_expr);
 			skip_skan_path->comparison_clauses = lappend(skip_skan_path->comparison_clauses, clause);
 			skip_skan_path->comparison_columns = lappend_int(skip_skan_path->comparison_columns, col);
-			skip_skan_path->comparison_table_attnums[col] = table_col;
+
+			/* if we are doing an IndexOnly scan then we'll get back the data
+			 * in the index's tuple format, otherwise use the attnums from the
+			 * underlying table.
+			 */
+			if (index_path->path.pathtype == T_IndexOnlyScan)
+				skip_skan_path->comparison_table_attnums[col] = col + 1;
+			else
+				skip_skan_path->comparison_table_attnums[col] = table_col;
 		}
 
 		//FIXME figure out costing Selectivity should be approximately n_distinct/total_tuples

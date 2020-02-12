@@ -27,6 +27,7 @@ typedef struct SkipSkanState
 	int *distinct_typ_len;
 	Datum *prev_vals;
 	bool *prev_is_null;
+	Buffer *index_only_buffer;
 	bool found_first;
 	bool needs_rescan;
 	bool index_only_scan;
