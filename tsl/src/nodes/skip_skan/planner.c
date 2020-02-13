@@ -39,7 +39,10 @@ skip_skan_begin(CustomScanState *node, EState *estate, int eflags)
 	SkipSkanState *state = (SkipSkanState *) node;
 	if (IsA(state->idx_scan, IndexScan))
 	{
-		IndexScanState *idx = ExecInitIndexScan(state->idx_scan, estate, eflags);
+		IndexScanState *idx = castNode(IndexScanState, ExecInitNode(state->idx_scan, estate, eflags));
+
+		node->custom_ps = list_make1(&idx->ss.ps);
+
 		state->idx = &idx->ss;
 		state->scan_keys = &idx->iss_ScanKeys;
 		state->num_scan_keys = &idx->iss_NumScanKeys;
@@ -59,7 +62,10 @@ skip_skan_begin(CustomScanState *node, EState *estate, int eflags)
 	}
 	else if(IsA(state->idx_scan, IndexOnlyScan))
 	{
-		IndexOnlyScanState *idx = ExecInitIndexOnlyScan(state->idx_scan, estate, eflags);
+		IndexOnlyScanState *idx = castNode(IndexOnlyScanState, ExecInitNode(state->idx_scan, estate, eflags));
+
+		node->custom_ps = list_make1(&idx->ss.ps);
+
 		state->idx = &idx->ss;
 		state->scan_keys = &idx->ioss_ScanKeys;
 		state->num_scan_keys = &idx->ioss_NumScanKeys;
