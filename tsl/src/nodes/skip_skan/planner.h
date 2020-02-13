@@ -12,6 +12,14 @@
 #include <nodes/execnodes.h>
 #include <optimizer/planner.h>
 
+typedef enum SkipColumnState
+{
+	SkipColumnFoundNothing = 0x0,
+	SkipColumnFoundMin = 0x1,
+	SkipColumnFoundNull = 0x2,
+	SkipColumnFoundMinAndNull = SkipColumnFoundNull | SkipColumnFoundMin,
+} SkipColumnState;
+
 typedef struct SkipSkanState
 {
 	CustomScanState cscan_state;
@@ -30,7 +38,12 @@ typedef struct SkipSkanState
 	int *distinct_typ_len;
 	Datum *prev_vals;
 	bool *prev_is_null;
+
+	SkipColumnState *column_state;
+
 	Buffer *index_only_buffer;
+	bool *reached_end;
+
 	bool found_first;
 	bool needs_rescan;
 	bool index_only_scan;

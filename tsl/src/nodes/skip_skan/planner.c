@@ -46,6 +46,7 @@ skip_skan_begin(CustomScanState *node, EState *estate, int eflags)
 		state->index_rel = idx->iss_RelationDesc;
 		state->scan_desc = &idx->iss_ScanDesc;
 		state->index_only_buffer = NULL;
+		state->reached_end = &idx->iss_ReachedEnd;
 
 		state->index_only_scan = false;
 
@@ -65,6 +66,7 @@ skip_skan_begin(CustomScanState *node, EState *estate, int eflags)
 		state->index_rel = idx->ioss_RelationDesc;
 		state->scan_desc = &idx->ioss_ScanDesc;
 		state->index_only_buffer = &idx->ioss_VMBuffer;
+		state->reached_end = NULL;
 
 		state->index_only_scan = true;
 
@@ -80,6 +82,7 @@ skip_skan_begin(CustomScanState *node, EState *estate, int eflags)
 
 	state->prev_vals = palloc0(sizeof(*state->prev_vals) * state->num_distinct_cols);
 	state->prev_is_null = palloc(sizeof(*state->prev_is_null) * state->num_distinct_cols);
+	state->column_state = palloc0(sizeof(*state->column_state) * state->num_distinct_cols);
 	memset(state->prev_is_null, true, sizeof(*state->prev_is_null) * state->num_distinct_cols);
 	state->found_first = false;
 	state->needs_rescan = false;
@@ -106,6 +109,31 @@ skip_skan_state_get_scankey(SkipSkanState *state, int idx)
 	return &skip_skan_state_get_scankeys(state)[idx];
 }
 
+static void
+skip_skan_state_beginscan(SkipSkanState *state)
+{
+	IndexScanDesc new_scan_desc;
+	CustomScanState *node = &state->cscan_state;
+	EState *estate = node->ss.ps.state;
+	IndexScanDesc old_scan_desc = skip_skan_state_get_scandesc(state);
+	if(old_scan_desc != NULL)
+		index_endscan(old_scan_desc);
+
+	new_scan_desc = index_beginscan(node->ss.ss_currentRelation,
+		state->index_rel,
+		estate->es_snapshot,
+		*state->num_scan_keys,
+		0 /*norderbys*/);
+
+	if (state->index_only_scan)
+	{
+		new_scan_desc->xs_want_itup = true;
+		*state->index_only_buffer = InvalidBuffer;
+	}
+
+	*state->scan_desc = new_scan_desc;
+}
+
 static TupleTableSlot *
 skip_skan_exec(CustomScanState *node)
 {
@@ -121,17 +149,7 @@ skip_skan_exec(CustomScanState *node)
 		 */
 		Assert(*state->num_scan_keys >= state->num_distinct_cols);
 		*state->num_scan_keys -= state->num_distinct_cols;
-		*state->scan_desc = index_beginscan(node->ss.ss_currentRelation,
-			state->index_rel,
-			estate->es_snapshot,
-			*state->num_scan_keys,
-			0 /*norderbys*/);
-
-		if (state->index_only_scan)
-		{
-			skip_skan_state_get_scandesc(state)->xs_want_itup = true;
-			*state->index_only_buffer = InvalidBuffer;
-		}
+		skip_skan_state_beginscan(state);
 
 		/* ignore the first scan keys, which are used for skipping, we'll set
 		 * this back once we have the inital values
@@ -157,14 +175,34 @@ skip_skan_exec(CustomScanState *node)
 	result = state->idx->ps.ExecProcNode(&state->idx->ps);
 	if (!TupIsNull(result))
 		update_skip_key(state, result);
+	else if (state->column_state[0] != SkipColumnFoundMinAndNull)
+	{
+		if(!(state->column_state[0] & SkipColumnFoundNull))
+		{
+			skip_skan_state_get_scankey(state, 0)->sk_flags = SK_SEARCHNULL | SK_ISNULL;
+			state->column_state[0] |= SkipColumnFoundNull;
+			// skip_skan_state_beginscan(state);
+			if (state->reached_end != NULL)
+				*state->reached_end = false;
+			return skip_skan_exec(&state->cscan_state);
+		}
+		else if (!(state->column_state[0] & SkipColumnFoundMin))
+		{
+			skip_skan_state_get_scankey(state, 0)->sk_flags = SK_SEARCHNOTNULL | SK_ISNULL;
+			state->column_state[0] |= SkipColumnFoundMin;
+			// skip_skan_state_beginscan(state);
+			if (state->reached_end != NULL)
+				*state->reached_end = false;
+			return skip_skan_exec(&state->cscan_state);
+		}
+	}
+
 	return result;
 }
 
 static void
 update_skip_key(SkipSkanState *state, TupleTableSlot *slot)
 {
-	CustomScanState *node = &state->cscan_state;
-	EState	   *estate = node->ss.ps.state;
 	slot_getsomeattrs(slot, state->max_distinct_col);
 
 	if (!state->found_first)
@@ -190,28 +228,22 @@ update_skip_key(SkipSkanState *state, TupleTableSlot *slot)
 		key->sk_argument = state->prev_vals[i];
 		if (state->prev_is_null[i])
 		{
-			elog(WARNING, "%d is null", col);
+			key->sk_flags &= ~SK_SEARCHNULL;
 			key->sk_flags |= SK_ISNULL;
+			state->column_state[i] |= SkipColumnFoundNull;
 		}
 		else
-			key->sk_flags &= ~SK_ISNULL;
+		{
+			key->sk_flags &= ~(SK_ISNULL | SK_SEARCHNOTNULL);
+			state->column_state[i] |= SkipColumnFoundMin;
+		}
 		MemoryContextSwitchTo(old_ctx);
 	}
 
 	//FIXME handle NULLs
 	if (!state->found_first)
 	{
-		index_endscan(skip_skan_state_get_scandesc(state));
-		*state->scan_desc = index_beginscan(node->ss.ss_currentRelation,
-			state->index_rel,
-			estate->es_snapshot,
-			*state->num_scan_keys,
-			0 /*norderbys*/);
-		if (state->index_only_scan)
-		{
-			skip_skan_state_get_scandesc(state)->xs_want_itup = true;
-			*state->index_only_buffer = InvalidBuffer;
-		}
+		skip_skan_state_beginscan(state);
 		state->found_first = true;
 	}
 
@@ -382,6 +414,7 @@ ts_add_skip_skan_paths(PlannerInfo *root, RelOptInfo *output_rel)
 		skip_skan_path->cpath.path = unique_path->path;
 		skip_skan_path->cpath.path.type = T_CustomPath;
 		skip_skan_path->cpath.path.pathtype = T_CustomScan;
+		// skip_skan_path->cpath.custom_paths = list_make1(index_path);
 		skip_skan_path->cpath.methods = &skip_skan_path_methods;
 		skip_skan_path->index_path = index_path;
 		skip_skan_path->num_distinct_cols = num_distinct_cols;
