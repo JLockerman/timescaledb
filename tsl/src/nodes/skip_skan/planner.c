@@ -34,6 +34,22 @@
 #include "nodes/skip_skan/planner.h"
 
 static void
+swap_slots(TupleTableSlot **a, TupleTableSlot **b)
+{
+	void *temp = *a;
+	*a = *b;
+	*b = temp;
+}
+
+static void
+swap_pi(ProjectionInfo **a, ProjectionInfo **b)
+{
+	void *temp = *a;
+	*a = *b;
+	*b = temp;
+}
+
+static void
 skip_skan_begin(CustomScanState *node, EState *estate, int eflags)
 {
 	SkipSkanState *state = (SkipSkanState *) node;
@@ -47,6 +63,15 @@ skip_skan_begin(CustomScanState *node, EState *estate, int eflags)
 		state->recheck_state = idx->indexqualorig;
 		state->index_only_buffer = NULL;
 		state->index_only_scan = false;
+
+		swap_slots(&state->cscan_state.ss.ss_ScanTupleSlot,
+			&idx->ss.ss_ScanTupleSlot);
+
+		swap_slots(&state->cscan_state.ss.ps.ps_ResultTupleSlot,
+			&idx->ss.ps.ps_ResultTupleSlot);
+
+		swap_pi(&state->cscan_state.ss.ps.ps_ProjInfo, &idx->ss.ps.ps_ProjInfo);
+
 		if (idx->iss_NumOrderByKeys > 0)
 			elog(ERROR, "cannot SkipSkan with OrderByKeys");
 
@@ -64,6 +89,15 @@ skip_skan_begin(CustomScanState *node, EState *estate, int eflags)
 		state->recheck_state = idx->indexqual;
 		state->index_only_scan = true;
 		state->index_only_buffer = &idx->ioss_VMBuffer;
+
+		swap_slots(&state->cscan_state.ss.ss_ScanTupleSlot,
+			&idx->ss.ss_ScanTupleSlot);
+
+		swap_slots(&state->cscan_state.ss.ps.ps_ResultTupleSlot,
+			&idx->ss.ps.ps_ResultTupleSlot);
+
+		swap_pi(&state->cscan_state.ss.ps.ps_ProjInfo, &idx->ss.ps.ps_ProjInfo);
+
 		if (idx->ioss_NumOrderByKeys > 0)
 			elog(ERROR, "cannot SkipSkan with OrderByKeys");
 
@@ -455,7 +489,17 @@ ts_add_skip_skan_paths(PlannerInfo *root, RelOptInfo *output_rel)
 			continue;
 
 		unique_path = castNode(UpperUniquePath, path);
-		//TODO IndexOnlyPath
+
+		/* currently we do not handle DISTINCT on more than one key. To do so,
+		 * we would need to break down the SkipScan into subproblems: first
+		 * find the minimal tuple then for each prefix find all unique suffix
+		 * tuples. For instance, if we are searching over (int, int), we would
+		 * first find (0, 0) then find (0, N) for all N in the domain, then
+		 * find (1, N), then (2, N), etc
+		 */
+		if (unique_path->numkeys > 1)
+			continue;
+
 		if (!IsA(unique_path->subpath, IndexPath))
 			continue;
 

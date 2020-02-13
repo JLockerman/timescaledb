@@ -182,7 +182,7 @@ _guc_init(void)
 							 NULL,
 							 NULL);
 
-	DefineCustomBoolVariable("timescaledb.enable_skip_skan",
+	DefineCustomBoolVariable("timescaledb.enable_skipskan",
 							 "Enable SkipSkan",
 							 "Enable SkipSkan for DISTINCT queries",
 							 &ts_guc_enable_skip_skan,
