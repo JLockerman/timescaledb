@@ -15,11 +15,14 @@
 typedef struct SkipSkanState
 {
 	CustomScanState cscan_state;
-	ExprState *recheck_state;
-	IndexScanDesc scan_desc;
+	IndexScanDesc *scan_desc;
 	MemoryContext ctx;
-	ScanKey scan_keys;
-	int num_scan_keys;
+
+	ScanState *idx;
+
+	int *num_scan_keys;
+	ScanKey *scan_keys;
+
 	int num_distinct_cols;
 	int max_distinct_col;
 	int *distinc_col_attnums;
@@ -33,7 +36,6 @@ typedef struct SkipSkanState
 	bool index_only_scan;
 
 	Relation index_rel;
-	void *idx;
 	void *idx_scan;
 } SkipSkanState;
 

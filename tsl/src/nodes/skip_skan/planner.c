@@ -34,43 +34,20 @@
 #include "nodes/skip_skan/planner.h"
 
 static void
-swap_slots(TupleTableSlot **a, TupleTableSlot **b)
-{
-	void *temp = *a;
-	*a = *b;
-	*b = temp;
-}
-
-static void
-swap_pi(ProjectionInfo **a, ProjectionInfo **b)
-{
-	void *temp = *a;
-	*a = *b;
-	*b = temp;
-}
-
-static void
 skip_skan_begin(CustomScanState *node, EState *estate, int eflags)
 {
 	SkipSkanState *state = (SkipSkanState *) node;
 	if (IsA(state->idx_scan, IndexScan))
 	{
 		IndexScanState *idx = ExecInitIndexScan(state->idx_scan, estate, eflags);
-		state->idx = idx;
-		state->scan_keys = idx->iss_ScanKeys;
-		state->num_scan_keys = idx->iss_NumScanKeys;
+		state->idx = &idx->ss;
+		state->scan_keys = &idx->iss_ScanKeys;
+		state->num_scan_keys = &idx->iss_NumScanKeys;
 		state->index_rel = idx->iss_RelationDesc;
-		state->recheck_state = idx->indexqualorig;
+		state->scan_desc = &idx->iss_ScanDesc;
 		state->index_only_buffer = NULL;
+
 		state->index_only_scan = false;
-
-		swap_slots(&state->cscan_state.ss.ss_ScanTupleSlot,
-			&idx->ss.ss_ScanTupleSlot);
-
-		swap_slots(&state->cscan_state.ss.ps.ps_ResultTupleSlot,
-			&idx->ss.ps.ps_ResultTupleSlot);
-
-		swap_pi(&state->cscan_state.ss.ps.ps_ProjInfo, &idx->ss.ps.ps_ProjInfo);
 
 		if (idx->iss_NumOrderByKeys > 0)
 			elog(ERROR, "cannot SkipSkan with OrderByKeys");
@@ -82,21 +59,14 @@ skip_skan_begin(CustomScanState *node, EState *estate, int eflags)
 	else if(IsA(state->idx_scan, IndexOnlyScan))
 	{
 		IndexOnlyScanState *idx = ExecInitIndexOnlyScan(state->idx_scan, estate, eflags);
-		state->idx = idx;
-		state->scan_keys = idx->ioss_ScanKeys;
-		state->num_scan_keys = idx->ioss_NumScanKeys;
+		state->idx = &idx->ss;
+		state->scan_keys = &idx->ioss_ScanKeys;
+		state->num_scan_keys = &idx->ioss_NumScanKeys;
 		state->index_rel = idx->ioss_RelationDesc;
-		state->recheck_state = idx->indexqual;
-		state->index_only_scan = true;
+		state->scan_desc = &idx->ioss_ScanDesc;
 		state->index_only_buffer = &idx->ioss_VMBuffer;
 
-		swap_slots(&state->cscan_state.ss.ss_ScanTupleSlot,
-			&idx->ss.ss_ScanTupleSlot);
-
-		swap_slots(&state->cscan_state.ss.ps.ps_ResultTupleSlot,
-			&idx->ss.ps.ps_ResultTupleSlot);
-
-		swap_pi(&state->cscan_state.ss.ps.ps_ProjInfo, &idx->ss.ps.ps_ProjInfo);
+		state->index_only_scan = true;
 
 		if (idx->ioss_NumOrderByKeys > 0)
 			elog(ERROR, "cannot SkipSkan with OrderByKeys");
@@ -108,7 +78,6 @@ skip_skan_begin(CustomScanState *node, EState *estate, int eflags)
 	else
 		elog(ERROR, "unknown subscan type in SkipSkan");
 
-
 	state->prev_vals = palloc0(sizeof(*state->prev_vals) * state->num_distinct_cols);
 	state->prev_is_null = palloc(sizeof(*state->prev_is_null) * state->num_distinct_cols);
 	memset(state->prev_is_null, true, sizeof(*state->prev_is_null) * state->num_distinct_cols);
@@ -116,199 +85,79 @@ skip_skan_begin(CustomScanState *node, EState *estate, int eflags)
 	state->needs_rescan = false;
 }
 
-static TupleTableSlot *index_skip_skan(SkipSkanState *state);
-static TupleTableSlot *index_only_skip_skan(SkipSkanState *state);
+static void update_skip_key(SkipSkanState *state, TupleTableSlot *slot);
+
+static inline IndexScanDesc
+skip_skan_state_get_scandesc(SkipSkanState *state)
+{
+	return *state->scan_desc;
+}
+
+static inline ScanKey
+skip_skan_state_get_scankeys(SkipSkanState *state)
+{
+	return *state->scan_keys;
+}
+
+static inline ScanKey
+skip_skan_state_get_scankey(SkipSkanState *state, int idx)
+{
+	Assert(idx < *state->num_scan_keys);
+	return &skip_skan_state_get_scankeys(state)[idx];
+}
 
 static TupleTableSlot *
 skip_skan_exec(CustomScanState *node)
 {
 	SkipSkanState *state = (SkipSkanState *)node;
 	EState	   *estate = node->ss.ps.state;
+	TupleTableSlot *result;
 
-	if (state->scan_desc == NULL)
+	if (skip_skan_state_get_scandesc(state) == NULL)
 	{
 		/* first time through we ignore the inital scan keys which are used to
-		 * skip previously seen values
+		 * skip previously seen values, we'll change back the number of scan keys
+		 * the first time through update_skip_key
 		 */
-		int nkeys = state->num_scan_keys - state->num_distinct_cols;
-		state->scan_desc = index_beginscan(node->ss.ss_currentRelation,
+		Assert(*state->num_scan_keys >= state->num_distinct_cols);
+		*state->num_scan_keys -= state->num_distinct_cols;
+		*state->scan_desc = index_beginscan(node->ss.ss_currentRelation,
 			state->index_rel,
 			estate->es_snapshot,
-			nkeys,
+			*state->num_scan_keys,
 			0 /*norderbys*/);
 
 		if (state->index_only_scan)
 		{
-			state->scan_desc->xs_want_itup = true;
+			skip_skan_state_get_scandesc(state)->xs_want_itup = true;
 			*state->index_only_buffer = InvalidBuffer;
 		}
 
-		index_rescan(state->scan_desc,
-			/* ignore the first scan keys, which are used for skipping */
-			state->scan_keys + state->num_distinct_cols,
-			nkeys,
+		/* ignore the first scan keys, which are used for skipping, we'll set
+		 * this back once we have the inital values
+		 */
+		state->scan_keys += state->num_distinct_cols;
+		index_rescan(skip_skan_state_get_scandesc(state),
+
+			*state->scan_keys,
+			*state->num_scan_keys,
 			NULL /*orderbys*/,
 			0 /*norderbys*/);
 	}
 	else if (state->needs_rescan)
 	{
 		/* in subsequent times we rescan based on the previously found element */
-		index_rescan(state->scan_desc,
-			state->scan_keys,
-			state->num_scan_keys,
+		index_rescan(skip_skan_state_get_scandesc(state),
+			*state->scan_keys,
+			*state->num_scan_keys,
 			NULL /*orderbys*/,
 			0 /*norderbys*/);;
 	}
 
-	if (state->index_only_scan)
-		return index_only_skip_skan(state);
-	else
-		return index_skip_skan(state);
-}
-
-static void update_skip_key(SkipSkanState *state, TupleTableSlot *slot);
-
-/* based on IndexNext */
-static TupleTableSlot *
-index_skip_skan(SkipSkanState *state)
-{
-	CustomScanState *node = &state->cscan_state;
-	TupleTableSlot *slot = node->ss.ss_ScanTupleSlot;
-	ExprContext *econtext = node->ss.ps.ps_ExprContext;
-	HeapTuple tuple;
-
-	//FIXME get scan dir from interior plan
-	while ((tuple = index_getnext(state->scan_desc, ForwardScanDirection)) != NULL)
-	{
-		CHECK_FOR_INTERRUPTS();
-
-		ExecStoreTuple(tuple, /* tuple to store */
-			slot, /* slot to store in */
-			state->scan_desc->xs_cbuf,   /* buffer containing tuple */
-			false); /* don't pfree */
-
-		 /*
-          * If the index was lossy, we have to recheck the index quals using
-          * the fetched tuple.
-          */
-		if (state->scan_desc->xs_recheck)
-		{
-			econtext->ecxt_scantuple = slot;
-			if (!ExecQualAndReset(state->recheck_state, econtext))
-			{
-				/* Fails recheck, so drop it and loop back for another */
-				InstrCountFiltered2(node, 1);
-				continue;
-			}
-		}
-
-		update_skip_key(state, slot);
-
-		return slot;
-	}
-
-	return NULL;
-}
-
-static void StoreIndexTuple(TupleTableSlot *slot, IndexTuple itup, TupleDesc itupdesc);
-
-/* based on IndexOnlyNext */
-static TupleTableSlot *
-index_only_skip_skan(SkipSkanState *state)
-{
-	CustomScanState *node = &state->cscan_state;
-	TupleTableSlot *slot = node->ss.ss_ScanTupleSlot;
-	ExprContext *econtext = node->ss.ps.ps_ExprContext;
-	ItemPointer tid;
-
-	//FIXME get scan dir from interior plan
-	while ((tid = index_getnext_tid(state->scan_desc, ForwardScanDirection)) != NULL)
-	{
-		HeapTuple tuple = NULL;
-		CHECK_FOR_INTERRUPTS();
-
-		/* see https://github.com/postgres/postgres/blob/34f805c8cf1bc4d54075526d3b023d9194ccd2cd/src/backend/executor/nodeIndexonlyscan.c#L125 for comments*/
-
-		if (!VM_ALL_VISIBLE(state->scan_desc->heapRelation,
-				ItemPointerGetBlockNumber(tid), state->index_only_buffer))
-		{
-			/*
-			 * Rats, we have to visit the heap to check visibility.
-			 */
-			InstrCountTuples2(node, 1);
-			tuple = index_fetch_heap(state->scan_desc);
-			if (tuple == NULL)
-				continue;		/* no visible tuple, try next index entry */
-
-			if (state->scan_desc->xs_continue_hot)
-				elog(ERROR, "non-MVCC snapshots are not supported in index-only scans");
-		}
-
-		if (state->scan_desc->xs_hitup)
-		{
-			/*
-			 * We don't take the trouble to verify that the provided tuple has
-			 * exactly the slot's format, but it seems worth doing a quick
-			 * check on the number of fields.
-			 */
-			Assert(slot->tts_tupleDescriptor->natts ==
-				   state->scan_desc->xs_hitupdesc->natts);
-			ExecStoreTuple(state->scan_desc->xs_hitup, slot, InvalidBuffer, false);
-		}
-		else if (state->scan_desc->xs_itup)
-			StoreIndexTuple(slot, state->scan_desc->xs_itup, state->scan_desc->xs_itupdesc);
-		else
-			elog(ERROR, "no data returned for index-only scan");
-
-		 /*
-          * If the index was lossy, we have to recheck the index quals using
-          * the fetched tuple.
-          */
-		if (state->scan_desc->xs_recheck)
-		{
-			econtext->ecxt_scantuple = slot;
-			if (!ExecQualAndReset(state->recheck_state, econtext))
-			{
-				/* Fails recheck, so drop it and loop back for another */
-				InstrCountFiltered2(node, 1);
-				continue;
-			}
-		}
-
-		if (tuple == NULL)
-			PredicateLockPage(state->scan_desc->heapRelation,
-							  ItemPointerGetBlockNumber(tid),
-							  state->cscan_state.ss.ps.state->es_snapshot);
-
-		update_skip_key(state, slot);
-
-		return slot;
-	}
-
-	return NULL;
-}
-
-static void
-StoreIndexTuple(TupleTableSlot *slot, IndexTuple itup, TupleDesc itupdesc)
-{
-	int			nindexatts = itupdesc->natts;
-	Datum	   *values = slot->tts_values;
-	bool	   *isnull = slot->tts_isnull;
-	int			i;
-
-	/*
-	 * Note: we must use the tupdesc supplied by the AM in index_getattr, not
-	 * the slot's tupdesc, in case the latter has different datatypes (this
-	 * happens for btree name_ops in particular).  They'd better have the same
-	 * number of columns though, as well as being datatype-compatible which is
-	 * something we can't so easily check.
-	 */
-	Assert(slot->tts_tupleDescriptor->natts == nindexatts);
-
-	ExecClearTuple(slot);
-	for (i = 0; i < nindexatts; i++)
-		values[i] = index_getattr(itup, i + 1, itupdesc, &isnull[i]);
-	ExecStoreVirtualTuple(slot);
+	result = state->idx->ps.ExecProcNode(&state->idx->ps);
+	if (!TupIsNull(result))
+		update_skip_key(state, result);
+	return result;
 }
 
 static void
@@ -317,9 +166,17 @@ update_skip_key(SkipSkanState *state, TupleTableSlot *slot)
 	CustomScanState *node = &state->cscan_state;
 	EState	   *estate = node->ss.ps.state;
 	slot_getsomeattrs(slot, state->max_distinct_col);
+
+	if (!state->found_first)
+	{
+		state->scan_keys -= state->num_distinct_cols;
+		*state->num_scan_keys += state->num_distinct_cols;
+	}
+
 	for(int i = 0; i < state->num_distinct_cols; i++)
 	{
 		int col = state->distinc_col_attnums[i];
+
 		if (!state->prev_is_null[i] && !state->distinct_by_val[i])
 		{
 			pfree(DatumGetPointer(state->prev_vals[i]));
@@ -329,26 +186,30 @@ update_skip_key(SkipSkanState *state, TupleTableSlot *slot)
 		state->prev_vals[i] = datumCopy(slot_getattr(slot, col, &state->prev_is_null[i]),
 			state->distinct_by_val[i],
 			state->distinct_typ_len[i]);
-		state->scan_keys[i].sk_argument = state->prev_vals[i];
+		ScanKey key = skip_skan_state_get_scankey(state, i);
+		key->sk_argument = state->prev_vals[i];
 		if (state->prev_is_null[i])
-			state->scan_keys[i].sk_flags |= SK_ISNULL;
+		{
+			elog(WARNING, "%d is null", col);
+			key->sk_flags |= SK_ISNULL;
+		}
 		else
-			state->scan_keys[i].sk_flags &= ~SK_ISNULL;
+			key->sk_flags &= ~SK_ISNULL;
 		MemoryContextSwitchTo(old_ctx);
 	}
 
 	//FIXME handle NULLs
 	if (!state->found_first)
 	{
-		index_endscan(state->scan_desc);
-		state->scan_desc = index_beginscan(node->ss.ss_currentRelation,
+		index_endscan(skip_skan_state_get_scandesc(state));
+		*state->scan_desc = index_beginscan(node->ss.ss_currentRelation,
 			state->index_rel,
 			estate->es_snapshot,
-			state->num_scan_keys,
+			*state->num_scan_keys,
 			0 /*norderbys*/);
 		if (state->index_only_scan)
 		{
-			state->scan_desc->xs_want_itup = true;
+			skip_skan_state_get_scandesc(state)->xs_want_itup = true;
 			*state->index_only_buffer = InvalidBuffer;
 		}
 		state->found_first = true;
@@ -364,12 +225,9 @@ skip_skan_end(CustomScanState *node)
 {
 	SkipSkanState *state = (SkipSkanState *) node;
 	if (state->index_only_scan)
-		ExecEndIndexOnlyScan(state->idx);
+		ExecEndIndexOnlyScan(castNode(IndexOnlyScanState, state->idx));
 	else
-		ExecEndIndexScan(state->idx);
-	if (state->scan_desc != NULL)
-		index_endscan(state->scan_desc);
-	// elog(ERROR, "unimplemented");
+		ExecEndIndexScan(castNode(IndexScanState, state->idx));
 }
 
 static void
@@ -377,8 +235,10 @@ skip_skan_rescan(CustomScanState *node)
 {
 	elog(ERROR, "unimplemented");
 	SkipSkanState *state = (SkipSkanState *) node;
-	ExecReScanIndexScan(state->idx);
-
+	if (state->index_only_scan)
+		ExecReScanIndexOnlyScan(castNode(IndexOnlyScanState, state->idx));
+	else
+		ExecReScanIndexScan(castNode(IndexScanState, state->idx));
 }
 
 static CustomExecMethods skip_skan_state_methods = {
