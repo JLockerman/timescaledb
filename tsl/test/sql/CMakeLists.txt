@@ -61,6 +61,13 @@ if (${PG_VERSION_MAJOR} GREATER "9")
   endif(CMAKE_BUILD_TYPE MATCHES Debug)
 endif ()
 
+if (${PG_VERSION_MAJOR} GREATER "10")
+  list(APPEND TEST_FILES
+    plan_skip_skan.sql
+    skip_skan.sql
+  )
+endif ()
+
 if (CMAKE_BUILD_TYPE MATCHES Debug)
   list(APPEND TEST_FILES ${TEST_FILES_DEBUG})
 endif(CMAKE_BUILD_TYPE MATCHES Debug)

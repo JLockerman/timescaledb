@@ -167,10 +167,9 @@ skip_skan_exec(CustomScanState *node)
 		/* ignore the first scan keys, which are used for skipping, we'll set
 		 * this back once we have the inital values
 		 */
-		state->scan_keys += state->num_distinct_cols;
+		*state->scan_keys = *state->scan_keys + state->num_distinct_cols;
 		index_rescan(skip_skan_state_get_scandesc(state),
-
-			*state->scan_keys,
+			skip_skan_state_get_scankeys(state),
 			*state->num_scan_keys,
 			NULL /*orderbys*/,
 			0 /*norderbys*/);
@@ -179,10 +178,10 @@ skip_skan_exec(CustomScanState *node)
 	{
 		/* in subsequent times we rescan based on the previously found element */
 		index_rescan(skip_skan_state_get_scandesc(state),
-			*state->scan_keys,
+			skip_skan_state_get_scankeys(state),
 			*state->num_scan_keys,
 			NULL /*orderbys*/,
-			0 /*norderbys*/);;
+			0 /*norderbys*/);
 	}
 
 	result = state->idx->ps.ExecProcNode(&state->idx->ps);
@@ -197,6 +196,9 @@ skip_skan_exec(CustomScanState *node)
 	}
 	else if (state->column_state[0] != SkipColumnFoundMinAndNull)
 	{
+		if (!state->found_first)
+			return result; /* nothing to find in the index */
+
 		if(!(state->column_state[0] & SkipColumnFoundNull))
 		{
 			skip_skan_state_get_scankey(state, 0)->sk_flags = SK_SEARCHNULL | SK_ISNULL;
@@ -225,7 +227,7 @@ update_skip_key(SkipSkanState *state, TupleTableSlot *slot)
 
 	if (!state->found_first)
 	{
-		state->scan_keys -= state->num_distinct_cols;
+		*state->scan_keys = *state->scan_keys - state->num_distinct_cols;
 		*state->num_scan_keys += state->num_distinct_cols;
 	}
 
@@ -289,6 +291,12 @@ skip_skan_rescan(CustomScanState *node)
 		index_endscan(old_scan_desc);
 	*state->scan_desc = NULL;
 
+	if (!state->found_first)
+	{
+		*state->scan_keys = *state->scan_keys - state->num_distinct_cols;
+		*state->num_scan_keys += state->num_distinct_cols;
+	}
+
 	if (state->index_only_scan)
 		ExecReScanIndexOnlyScan(castNode(IndexOnlyScanState, state->idx));
 	else
@@ -342,6 +350,99 @@ static CustomScanMethods skip_skan_plan_methods = {
 	.CreateCustomScanState = skip_skan_state_create,
 };
 
+static EquivalenceMember *
+find_ec_member_for_tle(EquivalenceClass *ec, TargetEntry *tle, Relids relids)
+{
+	Expr       *tlexpr;
+	ListCell   *lc;
+
+	/* We ignore binary-compatible relabeling on both ends */
+	tlexpr = tle->expr;
+	while (tlexpr && IsA(tlexpr, RelabelType))
+		tlexpr = ((RelabelType *) tlexpr)->arg;
+
+	foreach(lc, ec->ec_members)
+	{
+		EquivalenceMember *em = (EquivalenceMember *) lfirst(lc);
+		Expr       *emexpr;
+
+		/*
+		* We shouldn't be trying to sort by an equivalence class that
+		* contains a constant, so no need to consider such cases any further.
+		*/
+		if (em->em_is_const)
+			continue;
+
+		/*
+		* Ignore child members unless they belong to the rel being sorted.
+		*/
+		if (em->em_is_child &&
+			!bms_is_subset(em->em_relids, relids))
+			continue;
+
+		/* Match if same expression (after stripping relabel) */
+		emexpr = em->em_expr;
+		while (emexpr && IsA(emexpr, RelabelType))
+			emexpr = ((RelabelType *) emexpr)->arg;
+
+		if (equal(emexpr, tlexpr))
+			return em;
+	}
+
+	return NULL;
+}
+
+int *
+find_columns_from_tlist(List *target_list, List *pathkeys, int num_skip_clauses)
+{
+	int *distinct_columns = palloc0(sizeof(*distinct_columns) * num_skip_clauses);
+	Assert(pathkeys != NIL);
+	int keyno = 0;
+	ListCell *lc;
+	foreach(lc, pathkeys)
+	{
+		if (keyno >= num_skip_clauses)
+			break;
+		PathKey *pathkey = (PathKey *) lfirst(lc);
+		EquivalenceClass *ec = pathkey->pk_eclass;
+		TargetEntry *tle = NULL;
+		if (ec->ec_has_volatile)
+		{
+			/*
+			 * If the pathkey's EquivalenceClass is volatile, then it must
+			 * have come from an ORDER BY clause, and we have to match it to
+			 * that same targetlist entry.
+			 */
+			if (ec->ec_sortref == 0)    /* can't happen */
+				elog(ERROR, "volatile EquivalenceClass has no sortref");
+			tle = get_sortgroupref_tle(ec->ec_sortref, target_list);
+			Assert(tle);
+			Assert(list_length(ec->ec_members) == 1);
+		}
+		else
+		{
+			/*
+			* Otherwise, we can use any non-constant expression listed in the
+			* pathkey's EquivalenceClass.  For now, we take the first tlist
+			* item found in the EC.
+			*/
+			ListCell   *j;
+			foreach(j, target_list)
+			{
+				tle = (TargetEntry *) lfirst(j);
+				if (find_ec_member_for_tle(ec, tle, NULL))
+					break;
+				tle = NULL;
+			}
+		}
+
+		if (!tle)
+			elog(ERROR, "could not find pathkey item to sort");
+		distinct_columns[keyno] = tle->resno;
+	}
+	return distinct_columns;
+}
+
 static Plan *
 skip_skan_plan_create(PlannerInfo *root, RelOptInfo *relopt, CustomPath *best_path,
 						   List *tlist, List *clauses, List *custom_plans)
@@ -369,6 +470,12 @@ skip_skan_plan_create(PlannerInfo *root, RelOptInfo *relopt, CustomPath *best_pa
 	}
 	else
 		elog(ERROR, "bad plan");
+	/* based on make_unique_from_pathkeys */
+
+	//FIXME we need the byVal and size from here
+	int *distinct_columns = find_columns_from_tlist(plan->targetlist,
+		best_path->path.pathkeys,
+		num_skip_clauses);
 
 	skip_plan->custom_scan_tlist = plan->targetlist;
 	skip_plan->scan.plan.qual = NIL;
@@ -377,11 +484,7 @@ skip_skan_plan_create(PlannerInfo *root, RelOptInfo *relopt, CustomPath *best_pa
 	skip_plan->scan.plan.parallel_aware = false;
 	skip_plan->methods = &skip_skan_plan_methods;
 	skip_plan->custom_plans = list_make1(plan);
-	skip_plan->custom_private = lappend(skip_plan->custom_private, num_skip_clauses);
-	// skip_plan->custom_private = lappend(skip_plan->custom_private, plan);
-	skip_plan->custom_private = lappend(skip_plan->custom_private, path->comparison_table_attnums);
-	skip_plan->custom_private = lappend(skip_plan->custom_private, path->distinct_by_val);
-	skip_plan->custom_private = lappend(skip_plan->custom_private, path->distinct_typ_len);
+	skip_plan->custom_private = list_make4(num_skip_clauses, distinct_columns, path->distinct_by_val, path->distinct_typ_len);
 	return &skip_plan->scan.plan;
 }
 
@@ -519,7 +622,6 @@ create_index_skip_skan_path(PlannerInfo *root, UpperUniquePath *unique_path, Ind
 	skip_skan_path->index_path = index_path;
 	skip_skan_path->num_distinct_cols = num_distinct_cols;
 	skip_skan_path->comparison_clauses = NIL;
-	skip_skan_path->comparison_table_attnums = palloc(sizeof(*skip_skan_path->comparison_table_attnums) * num_distinct_cols);
 	skip_skan_path->distinct_by_val = palloc(sizeof(*skip_skan_path->distinct_by_val) * num_distinct_cols);
 	skip_skan_path->distinct_typ_len = palloc(sizeof(*skip_skan_path->distinct_typ_len) * num_distinct_cols);
 	Assert(num_distinct_cols <= index_path->indexinfo->nkeycolumns);
@@ -587,15 +689,6 @@ create_index_skip_skan_path(PlannerInfo *root, UpperUniquePath *unique_path, Ind
 		RestrictInfo *clause = make_simple_restrictinfo(comparsion_expr);
 		skip_skan_path->comparison_clauses = lappend(skip_skan_path->comparison_clauses, clause);
 		skip_skan_path->comparison_columns = lappend_int(skip_skan_path->comparison_columns, col);
-
-		/* if we are doing an IndexOnly scan then we'll get back the data
-			* in the index's tuple format, otherwise use the attnums from the
-			* underlying table.
-			*/
-		if (index_path->path.pathtype == T_IndexOnlyScan)
-			skip_skan_path->comparison_table_attnums[col] = col + 1;
-		else
-			skip_skan_path->comparison_table_attnums[col] = table_col;
 	}
 
 	return skip_skan_path;
@@ -608,11 +701,12 @@ index_path_contains_runtime_keys(IndexPath *index_path)
 	ListCell *clause_cell;
 	foreach(clause_cell, index_path->indexquals)
 	{
-		Expr *clause = (Expr *) lfirst(clause_cell);
+		RestrictInfo *info = (RestrictInfo *) lfirst(clause_cell);
+		Expr *clause = info->clause;
 		if(IsA(clause, OpExpr) || IsA(clause, RowCompareExpr) || IsA(clause, ScalarArrayOpExpr))
 		{
 			Expr *leftop = (Expr *) get_leftop(clause);
-			Expr *rightop = (Expr *) get_leftop(clause);
+			Expr *rightop = (Expr *) get_rightop(clause);
 
 			if (leftop && IsA(leftop, RelabelType))
 				leftop = ((RelabelType *) leftop)->arg;

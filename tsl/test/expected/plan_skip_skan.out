@@ -1,0 +1,191 @@
+-- This file and its contents are licensed under the Timescale License.
+-- Please see the included NOTICE for copyright information and
+-- LICENSE-TIMESCALE for a copy of the license.
+\set PREFIX 'EXPLAIN (COSTS OFF)'
+\set SUFFIX
+CREATE TABLE test_table(time INT, dev INT, val INT);
+INSERT INTO test_table SELECT t, d, random() FROM generate_series(1, 1000) t, generate_series(1, 10) d;
+INSERT INTO test_table VALUES (NULL, 0, -1), (0, NULL, -1);
+CREATE INDEX ON test_table(dev);
+CREATE INDEX ON test_table(dev NULLS FIRST);
+CREATE INDEX ON test_table(dev, time);
+\ir include/skip_skan_test_query.sql
+-- This file and its contents are licensed under the Timescale License.
+-- Please see the included NOTICE for copyright information and
+-- LICENSE-TIMESCALE for a copy of the license.
+-- SkipSkan over IndexScan
+:PREFIX SELECT DISTINCT ON (dev) * FROM test_table;
+                          QUERY PLAN                          
+--------------------------------------------------------------
+ Custom Scan (SkipSkan) on test_table
+   ->  Index Scan using test_table_dev_time_idx on test_table
+         Index Cond: (dev > NULL::integer)
+(3 rows)
+
+-- SkipSkan over IndexOnlyScan
+:PREFIX SELECT DISTINCT ON (dev) dev FROM test_table;
+                            QUERY PLAN                             
+-------------------------------------------------------------------
+ Custom Scan (SkipSkan) on test_table
+   ->  Index Only Scan using test_table_dev_time_idx on test_table
+         Index Cond: (dev > NULL::integer)
+(3 rows)
+
+:PREFIX SELECT DISTINCT ON (dev) dev, time FROM test_table;
+                            QUERY PLAN                             
+-------------------------------------------------------------------
+ Custom Scan (SkipSkan) on test_table
+   ->  Index Only Scan using test_table_dev_time_idx on test_table
+         Index Cond: (dev > NULL::integer)
+(3 rows)
+
+-- SkipSkan with NULLS FIRST
+:PREFIX SELECT DISTINCT ON (dev) * FROM test_table ORDER BY dev NULLS FIRST;
+                        QUERY PLAN                        
+----------------------------------------------------------
+ Custom Scan (SkipSkan) on test_table
+   ->  Index Scan using test_table_dev_idx1 on test_table
+         Index Cond: (dev > NULL::integer)
+(3 rows)
+
+:PREFIX SELECT DISTINCT ON (dev) dev FROM test_table ORDER BY dev NULLS FIRST;
+                          QUERY PLAN                           
+---------------------------------------------------------------
+ Custom Scan (SkipSkan) on test_table
+   ->  Index Only Scan using test_table_dev_idx1 on test_table
+         Index Cond: (dev > NULL::integer)
+(3 rows)
+
+:PREFIX SELECT DISTINCT ON (dev) dev, time FROM test_table ORDER BY dev NULLS FIRST;
+                        QUERY PLAN                        
+----------------------------------------------------------
+ Custom Scan (SkipSkan) on test_table
+   ->  Index Scan using test_table_dev_idx1 on test_table
+         Index Cond: (dev > NULL::integer)
+(3 rows)
+
+-- WHERE CLAUSES
+:PREFIX SELECT DISTINCT ON (dev) * FROM test_table WHERE dev > 5;
+                               QUERY PLAN                                
+-------------------------------------------------------------------------
+ Custom Scan (SkipSkan) on test_table
+   ->  Index Scan using test_table_dev_time_idx on test_table
+         Index Cond: ((dev > NULL::integer) AND (dev > 5) AND (dev > 5))
+(3 rows)
+
+:PREFIX SELECT DISTINCT ON (dev) * FROM test_table WHERE time > 5;
+                                  QUERY PLAN                                   
+-------------------------------------------------------------------------------
+ Custom Scan (SkipSkan) on test_table
+   ->  Index Scan using test_table_dev_time_idx on test_table
+         Index Cond: ((dev > NULL::integer) AND ("time" > 5) AND ("time" > 5))
+(3 rows)
+
+:PREFIX SELECT DISTINCT ON (dev) * FROM test_table WHERE val > 5;
+                          QUERY PLAN                          
+--------------------------------------------------------------
+ Custom Scan (SkipSkan) on test_table
+   ->  Index Scan using test_table_dev_time_idx on test_table
+         Index Cond: (dev > NULL::integer)
+         Filter: (val > 5)
+(4 rows)
+
+:PREFIX SELECT DISTINCT ON (dev) dev FROM test_table WHERE dev > 5;
+                            QUERY PLAN                             
+-------------------------------------------------------------------
+ Custom Scan (SkipSkan) on test_table
+   ->  Index Only Scan using test_table_dev_time_idx on test_table
+         Index Cond: ((dev > NULL::integer) AND (dev > 5))
+(3 rows)
+
+:PREFIX SELECT DISTINCT ON (dev) dev FROM test_table WHERE time > 5;
+                            QUERY PLAN                             
+-------------------------------------------------------------------
+ Custom Scan (SkipSkan) on test_table
+   ->  Index Only Scan using test_table_dev_time_idx on test_table
+         Index Cond: ((dev > NULL::integer) AND ("time" > 5))
+(3 rows)
+
+:PREFIX SELECT DISTINCT ON (dev) dev FROM test_table WHERE val > 5;
+                          QUERY PLAN                          
+--------------------------------------------------------------
+ Custom Scan (SkipSkan) on test_table
+   ->  Index Scan using test_table_dev_time_idx on test_table
+         Index Cond: (dev > NULL::integer)
+         Filter: (val > 5)
+(4 rows)
+
+:PREFIX SELECT DISTINCT ON (dev) * FROM test_table WHERE dev != 5;
+                          QUERY PLAN                          
+--------------------------------------------------------------
+ Custom Scan (SkipSkan) on test_table
+   ->  Index Scan using test_table_dev_time_idx on test_table
+         Index Cond: ((dev > NULL::integer) AND (dev <> 5))
+(3 rows)
+
+:PREFIX SELECT DISTINCT ON (dev) * FROM test_table WHERE time != 5;
+                          QUERY PLAN                          
+--------------------------------------------------------------
+ Custom Scan (SkipSkan) on test_table
+   ->  Index Scan using test_table_dev_time_idx on test_table
+         Index Cond: (dev > NULL::integer)
+         Filter: ("time" <> 5)
+(4 rows)
+
+:PREFIX SELECT DISTINCT ON (dev) * FROM test_table WHERE val != 5;
+                          QUERY PLAN                          
+--------------------------------------------------------------
+ Custom Scan (SkipSkan) on test_table
+   ->  Index Scan using test_table_dev_time_idx on test_table
+         Index Cond: (dev > NULL::integer)
+         Filter: (val <> 5)
+(4 rows)
+
+:PREFIX SELECT DISTINCT ON (dev) * FROM test_table WHERE dev >= 1 + 1;
+                                QUERY PLAN                                 
+---------------------------------------------------------------------------
+ Custom Scan (SkipSkan) on test_table
+   ->  Index Scan using test_table_dev_time_idx on test_table
+         Index Cond: ((dev > NULL::integer) AND (dev >= 2) AND (dev >= 2))
+(3 rows)
+
+-- ReScan tests
+:PREFIX SELECT DISTINCT ON (dev) * FROM (
+    VALUES (1), (2)) a(v),
+    LATERAL (SELECT * FROM test_table WHERE time != a.v) b;
+                             QUERY PLAN                             
+--------------------------------------------------------------------
+ Unique
+   ->  Nested Loop
+         Join Filter: (test_table."time" <> "*VALUES*".column1)
+         ->  Index Scan using test_table_dev_time_idx on test_table
+         ->  Materialize
+               ->  Values Scan on "*VALUES*"
+(6 rows)
+
+:PREFIX SELECT * FROM (
+    VALUES (1), (2)) a(v),
+    LATERAL (SELECT DISTINCT ON (dev) * FROM test_table WHERE dev != a.v) b;
+                             QUERY PLAN                             
+--------------------------------------------------------------------
+ Nested Loop
+   ->  Values Scan on "*VALUES*"
+   ->  Custom Scan (SkipSkan) on test_table
+         ->  Index Scan using test_table_dev_time_idx on test_table
+               Index Cond: (dev > NULL::integer)
+               Filter: (dev <> "*VALUES*".column1)
+(6 rows)
+
+-- Doesn't SkipSkan with RuntimeKeys
+EXPLAIN (COSTS off) SELECT * FROM (
+    VALUES (1), (2)) a(v),
+    LATERAL (SELECT DISTINCT ON (dev) * FROM test_table WHERE dev >= a.v) b;
+                             QUERY PLAN                             
+--------------------------------------------------------------------
+ Nested Loop
+   ->  Values Scan on "*VALUES*"
+   ->  Unique
+         ->  Index Scan using test_table_dev_time_idx on test_table
+               Index Cond: (dev >= "*VALUES*".column1)
+(5 rows)
+

@@ -61,7 +61,6 @@ typedef struct SkipSkanPath
 	/* list of index clauses (RestricInfo *) which we'll use to skip past elements we've already seen */
 	List *comparison_clauses;
 	List *comparison_columns;
-	int *comparison_table_attnums;
 	bool *distinct_by_val;
 	int *distinct_typ_len;
 } SkipSkanPath;
