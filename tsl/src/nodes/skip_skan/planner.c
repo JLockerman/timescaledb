@@ -19,6 +19,7 @@
 #include <optimizer/clauses.h>
 #include <optimizer/pathnode.h>
 #include <optimizer/paths.h>
+#include <optimizer/paramassign.h>
 #include <optimizer/planmain.h>
 #include <optimizer/planner.h>
 #include <optimizer/restrictinfo.h>
@@ -392,7 +393,7 @@ find_ec_member_for_tle(EquivalenceClass *ec, TargetEntry *tle, Relids relids)
 	return NULL;
 }
 
-int *
+static int *
 find_columns_from_tlist(List *target_list, List *pathkeys, int num_skip_clauses)
 {
 	int *distinct_columns = palloc0(sizeof(*distinct_columns) * num_skip_clauses);
@@ -439,6 +440,7 @@ find_columns_from_tlist(List *target_list, List *pathkeys, int num_skip_clauses)
 		if (!tle)
 			elog(ERROR, "could not find pathkey item to sort");
 		distinct_columns[keyno] = tle->resno;
+		keyno += 1;
 	}
 	return distinct_columns;
 }
@@ -452,9 +454,37 @@ skip_skan_plan_create(PlannerInfo *root, RelOptInfo *relopt, CustomPath *best_pa
 	int num_skip_clauses = list_length(path->comparison_clauses);
 	IndexPath *index_path = path->index_path;
 
-	index_path->indexclauses = list_concat(path->comparison_clauses, index_path->indexclauses);
-	index_path->indexquals = list_concat(path->comparison_clauses, index_path->indexquals);
-	index_path->indexqualcols = list_concat(path->comparison_columns, index_path->indexqualcols);
+	// index_path->indexclauses = list_concat(path->comparison_clauses, index_path->indexclauses);
+	// index_path->indexquals = list_concat(path->comparison_clauses, index_path->indexquals);
+	// index_path->indexqualcols = list_concat(path->comparison_columns, index_path->indexqualcols);
+	List *stripped_comparison_clauses = get_actual_clauses(path->comparison_clauses);
+
+	List *fixed_comparison_clauses = NIL;
+	/* fix_indexqual_references */
+	ListCell *qual_cell, *col_cell;
+	forboth(qual_cell, path->comparison_clauses, col_cell, path->comparison_columns)
+	{
+		RestrictInfo *rinfo = lfirst_node(RestrictInfo, qual_cell);
+		int indexcol = lfirst_int(col_cell);
+		IndexOptInfo *index = index_path->indexinfo;
+		OpExpr *op = copyObject(castNode(OpExpr, rinfo->clause));
+		 castNode(OpExpr, copyObject(rinfo->clause));
+		Assert(list_length(op->args) == 2);
+		Assert(bms_equal(rinfo->left_relids, index->rel->relids));
+
+		/* fix_indexqual_operand */
+		Assert(index->indexkeys[indexcol] != 0);
+		Var *node = castNode(Var, linitial(op->args));
+		Assert(((Var *) node)->varno == index->rel->relid &&
+			((Var *) node)->varattno == index->indexkeys[indexcol]);
+
+		Var *result = (Var *) copyObject(node);
+		result->varno = INDEX_VAR;
+		result->varattno = indexcol + 1;
+
+		linitial(op->args) = result;
+		fixed_comparison_clauses = lappend(fixed_comparison_clauses, op);
+	}
 
 	Plan *plan = create_plan(root, &index_path->path);
 
@@ -462,17 +492,21 @@ skip_skan_plan_create(PlannerInfo *root, RelOptInfo *relopt, CustomPath *best_pa
 	{
 		IndexScan *idx_plan = castNode(IndexScan, plan);
 		skip_plan->scan = idx_plan->scan;
+		idx_plan->indexqual = list_concat(fixed_comparison_clauses, idx_plan->indexqual);
+		idx_plan->indexqualorig = list_concat(stripped_comparison_clauses, idx_plan->indexqualorig);
 	}
 	else if (IsA(plan, IndexOnlyScan))
 	{
 		IndexOnlyScan *idx_plan = castNode(IndexOnlyScan, plan);
 		skip_plan->scan = idx_plan->scan;
+		idx_plan->indexqual = list_concat(fixed_comparison_clauses, idx_plan->indexqual);
 	}
 	else
 		elog(ERROR, "bad plan");
 	/* based on make_unique_from_pathkeys */
 
-	//FIXME we need the byVal and size from here
+	//FIXME do we need the byVal and size from here?
+	//      what order are the columns returned in?
 	int *distinct_columns = find_columns_from_tlist(plan->targetlist,
 		best_path->path.pathkeys,
 		num_skip_clauses);
