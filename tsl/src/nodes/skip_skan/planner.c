@@ -454,9 +454,10 @@ skip_skan_plan_create(PlannerInfo *root, RelOptInfo *relopt, CustomPath *best_pa
 	int num_skip_clauses = list_length(path->comparison_clauses);
 	IndexPath *index_path = path->index_path;
 
-	// index_path->indexclauses = list_concat(path->comparison_clauses, index_path->indexclauses);
-	// index_path->indexquals = list_concat(path->comparison_clauses, index_path->indexquals);
-	// index_path->indexqualcols = list_concat(path->comparison_columns, index_path->indexqualcols);
+	/* technically our placeholder col > NULL is unsatisfiable, and in some instances
+	 * the planner will realize this and use is as an excuse to remove other quals.
+	 * in order to prevent this, we prepare this qual ourselves.
+	 */
 	List *stripped_comparison_clauses = get_actual_clauses(path->comparison_clauses);
 
 	List *fixed_comparison_clauses = NIL;
