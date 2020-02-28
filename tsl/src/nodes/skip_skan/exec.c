@@ -104,10 +104,9 @@ skip_skan_begin(CustomScanState *node, EState *estate, int eflags)
 	else
 		elog(ERROR, "unknown subscan type in SkipSkan");
 
-	state->prev_vals = palloc0(sizeof(*state->prev_vals) * state->num_distinct_cols);
-	state->prev_is_null = palloc(sizeof(*state->prev_is_null) * state->num_distinct_cols);
-	state->column_state = palloc0(sizeof(*state->column_state) * state->num_distinct_cols);
-	memset(state->prev_is_null, true, sizeof(*state->prev_is_null) * state->num_distinct_cols);
+	state->prev_distinct_val = 0;
+	state->prev_is_null = true;
+	state->column_state = SkipColumnFoundNothing;
 	state->found_first = false;
 	state->needs_rescan = false;
 }
@@ -176,15 +175,15 @@ skip_skan_exec(CustomScanState *node)
 		 * skip previously seen values, we'll change back the number of scan keys
 		 * the first time through update_skip_key
 		 */
-		Assert(*state->num_scan_keys >= state->num_distinct_cols);
-		*state->num_scan_keys -= state->num_distinct_cols;
+		Assert(*state->num_scan_keys >= 1);
+		*state->num_scan_keys -= 1;
 		skip_skan_state_beginscan(state);
 
 		/* ignore the first scan key, which is the qual we add to skip repeat
 		 * values, the other quals still need to be applied. We'll set this back
 		 * once we have the inital values, and our qual can be applied.
 		 */
-		*state->scan_keys = *state->scan_keys + state->num_distinct_cols;
+		*state->scan_keys = *state->scan_keys + 1;
 		index_rescan(skip_skan_state_get_scandesc(state),
 			skip_skan_state_get_scankeys(state),
 			*state->num_scan_keys,
@@ -215,7 +214,7 @@ skip_skan_exec(CustomScanState *node)
 		ExecMaterializeSlot(result);
 		update_skip_key(state, result);
 	}
-	else if (state->column_state[0] == SkipColumnFoundMinAndNull || state->column_state == SkipColumnFoundNothing)
+	else if (state->column_state == SkipColumnFoundMinAndNull || state->column_state == SkipColumnFoundNothing)
 		return result;
 	else
 	{
@@ -235,9 +234,9 @@ skip_skan_exec(CustomScanState *node)
 		 * NULL, we may be in a NULLS LAST column, so we need to check if a NULL
 		 * value exists.
 		 */
-		if(!(state->column_state[0] & SkipColumnFoundNull))
+		if(!(state->column_state & SkipColumnFoundNull))
 			return skip_skan_search_for_null(state);
-		else if (!(state->column_state[0] & SkipColumnFoundMin))
+		else if (!(state->column_state & SkipColumnFoundMin))
 			return skip_skan_search_for_nonnull(state);
 	}
 
@@ -252,7 +251,7 @@ skip_skan_search_for_null(SkipSkanState *state)
 	 * We'll remove the SK_SEARCHNULL in update_skip_key.
 	 */
 	skip_skan_state_get_scankey(state, 0)->sk_flags = SK_SEARCHNULL | SK_ISNULL;
-	state->column_state[0] |= SkipColumnFoundNull;
+	state->column_state |= SkipColumnFoundNull;
 	if (state->reached_end != NULL)
 		*state->reached_end = false;
 	return skip_skan_exec(&state->cscan_state);
@@ -266,7 +265,7 @@ skip_skan_search_for_nonnull(SkipSkanState *state)
 	 * to return. We'll remove the SK_SEARCHNOTNULL in update_skip_key.
 	 */
 	skip_skan_state_get_scankey(state, 0)->sk_flags = SK_SEARCHNOTNULL | SK_ISNULL;
-	state->column_state[0] |= SkipColumnFoundMin;
+	state->column_state |= SkipColumnFoundMin;
 	if (state->reached_end != NULL)
 		*state->reached_end = false;
 	return skip_skan_exec(&state->cscan_state);
@@ -275,53 +274,49 @@ skip_skan_search_for_nonnull(SkipSkanState *state)
 static void
 update_skip_key(SkipSkanState *state, TupleTableSlot *slot)
 {
-	slot_getsomeattrs(slot, state->max_distinct_col);
 
 	/* if this is the first tuple we found, re-add our skip-qual to the list of quals */
 	if (!state->found_first)
 	{
-		*state->scan_keys = *state->scan_keys - state->num_distinct_cols;
-		*state->num_scan_keys += state->num_distinct_cols;
+		*state->scan_keys = *state->scan_keys - 1;
+		*state->num_scan_keys += 1;
 	}
 
-	for(int i = 0; i < state->num_distinct_cols; i++)
+	int col = state->distinct_col_attnum;
+
+	if (!state->prev_is_null && !state->distinct_by_val)
 	{
-		int col = state->distinc_col_attnums[i];
-
-		if (!state->prev_is_null[i] && !state->distinct_by_val[i])
-		{
-			pfree(DatumGetPointer(state->prev_vals[i]));
-		}
-
-		MemoryContext old_ctx = MemoryContextSwitchTo(state->ctx);
-		state->prev_vals[i] = slot_getattr(slot, col, &state->prev_is_null[i]);
-		if (!state->prev_is_null[i])
-			state->prev_vals[i] = datumCopy(state->prev_vals[i],
-				state->distinct_by_val[i],
-				state->distinct_typ_len[i]);
-		ScanKey key = skip_skan_state_get_scankey(state, i);
-		key->sk_argument = state->prev_vals[i];
-		if (state->prev_is_null[i])
-		{
-			/* Once we've seen a NULL we don't need another, so we remove the
-			 * SEARCHNULL to enable us to finish early, if that's what's driving
-			 * us.
-			 */
-			key->sk_flags &= ~SK_SEARCHNULL;
-			key->sk_flags |= SK_ISNULL;
-			state->column_state[i] |= SkipColumnFoundNull;
-		}
-		else
-		{
-			/* Once we've found a value, we only want to find values after that
-			 * one, so remove SEARCHNOTNULL in case we were using that to find
-			 * the first non-NULL value.
-			 */
-			key->sk_flags &= ~(SK_ISNULL | SK_SEARCHNOTNULL);
-			state->column_state[i] |= SkipColumnFoundMin;
-		}
-		MemoryContextSwitchTo(old_ctx);
+		pfree(DatumGetPointer(state->prev_distinct_val));
 	}
+
+	MemoryContext old_ctx = MemoryContextSwitchTo(state->ctx);
+	state->prev_distinct_val = slot_getattr(slot, col, &state->prev_is_null);
+	if (!state->prev_is_null)
+		state->prev_distinct_val = datumCopy(state->prev_distinct_val,
+			state->distinct_by_val,
+			state->distinct_typ_len);
+	ScanKey key = skip_skan_state_get_scankey(state, 0);
+	key->sk_argument = state->prev_distinct_val;
+	if (state->prev_is_null)
+	{
+		/* Once we've seen a NULL we don't need another, so we remove the
+		 * SEARCHNULL to enable us to finish early, if that's what's driving
+		 * us.
+		 */
+		key->sk_flags &= ~SK_SEARCHNULL;
+		key->sk_flags |= SK_ISNULL;
+		state->column_state |= SkipColumnFoundNull;
+	}
+	else
+	{
+		/* Once we've found a value, we only want to find values after that
+		 * one, so remove SEARCHNOTNULL in case we were using that to find
+		 * the first non-NULL value.
+		 */
+		key->sk_flags &= ~(SK_ISNULL | SK_SEARCHNOTNULL);
+		state->column_state |= SkipColumnFoundMin;
+	}
+	MemoryContextSwitchTo(old_ctx);
 
 	if (!state->found_first)
 	{
@@ -359,8 +354,8 @@ skip_skan_rescan(CustomScanState *node)
 		 */
 		if (!state->found_first)
 		{
-			*state->scan_keys = *state->scan_keys - state->num_distinct_cols;
-			*state->num_scan_keys += state->num_distinct_cols;
+			*state->scan_keys = *state->scan_keys - 1;
+			*state->num_scan_keys += 1;
 		}
 	}
 	*state->scan_desc = NULL;
@@ -370,9 +365,9 @@ skip_skan_rescan(CustomScanState *node)
 	else
 		ExecReScanIndexScan(castNode(IndexScanState, state->idx));
 
-	memset(state->prev_vals, 0, sizeof(*state->prev_vals) * state->num_distinct_cols);
-	memset(state->prev_is_null, true, sizeof(*state->prev_is_null) * state->num_distinct_cols);
-	memset(state->column_state, 0, sizeof(*state->column_state) * state->num_distinct_cols);
+	state->prev_distinct_val = 0;
+	state->prev_is_null = true;
+	state->column_state = SkipColumnFoundNothing;
 	state->found_first = false;
 	state->needs_rescan = false;
 }
@@ -388,26 +383,15 @@ static CustomExecMethods skip_skan_state_methods = {
 Node *
 ts_skip_skan_state_create(CustomScan *cscan)
 {
-	int col = 0;
-	int max_distinct_col = 0;
 	SkipSkanState *state = (SkipSkanState *) newNode(sizeof(SkipSkanState), T_CustomScanState);
 
 	state->idx_scan = linitial(cscan->custom_plans);
 
-	state->num_distinct_cols = (int)linitial(cscan->custom_private);
-	state->distinc_col_attnums = lsecond(cscan->custom_private);
+	state->distinct_col_attnum = lsecond_int(cscan->custom_private);
 
-	for(col = 0; col < state->num_distinct_cols; col++)
-	{
-		if (state->distinc_col_attnums[col] > max_distinct_col)
-			max_distinct_col = state->distinc_col_attnums[col];
-	}
+	state->distinct_by_val = lthird_int(cscan->custom_private);
 
-	state->max_distinct_col = max_distinct_col;
-
-	state->distinct_by_val = lthird(cscan->custom_private);
-
-	state->distinct_typ_len = lfourth(cscan->custom_private);
+	state->distinct_typ_len = lfourth_int(cscan->custom_private);
 
 	state->cscan_state.methods = &skip_skan_state_methods;
 	return (Node *)state;

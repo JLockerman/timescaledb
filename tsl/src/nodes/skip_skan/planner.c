@@ -209,7 +209,8 @@ skip_skan_plan_create(PlannerInfo *root, RelOptInfo *relopt, CustomPath *best_pa
 	skip_plan->scan.plan.parallel_aware = false;
 	skip_plan->methods = &skip_skan_plan_methods;
 	skip_plan->custom_plans = list_make1(plan);
-	skip_plan->custom_private = list_make4(num_skip_clauses, distinct_columns, path->distinct_by_val, path->distinct_typ_len);
+	//FIXME single col
+	skip_plan->custom_private = list_make4(num_skip_clauses, distinct_columns[0], path->distinct_by_val[0], path->distinct_typ_len[0]);
 	return &skip_plan->scan.plan;
 }
 

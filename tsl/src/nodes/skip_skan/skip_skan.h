@@ -26,20 +26,19 @@ typedef struct SkipSkanState
 	IndexScanDesc *scan_desc;
 	MemoryContext ctx;
 
+	/* Interior Index(Only)Scan the SkipSkan runs over */
 	ScanState *idx;
 
 	int *num_scan_keys;
 	ScanKey *scan_keys;
 
-	int num_distinct_cols;
-	int max_distinct_col;
-	int *distinc_col_attnums;
-	bool *distinct_by_val;
-	int *distinct_typ_len;
-	Datum *prev_vals;
-	bool *prev_is_null;
+	int distinct_col_attnum;
+	bool distinct_by_val;
+	int distinct_typ_len;
+	Datum prev_distinct_val;
+	bool prev_is_null;
 
-	SkipColumnState *column_state;
+	SkipColumnState column_state;
 
 	Buffer *index_only_buffer;
 	bool *reached_end;
