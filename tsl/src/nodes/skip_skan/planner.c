@@ -317,8 +317,6 @@ ts_add_skip_skan_paths(PlannerInfo *root, RelOptInfo *output_rel)
 	}
 }
 
-static bool index_path_contains_runtime_keys(IndexPath *index_path);
-
 static SkipSkanPath *
 create_index_skip_skan_path(PlannerInfo *root, UpperUniquePath *unique_path, IndexPath *index_path, bool for_append)
 {
@@ -330,9 +328,6 @@ create_index_skip_skan_path(PlannerInfo *root, UpperUniquePath *unique_path, Ind
 	 * if any, work would be required to support them.
 	 */
 	if (index_path->indexorderbys != NIL)
-		return NULL;
-
-	if (index_path_contains_runtime_keys(index_path))
 		return NULL;
 
 	int num_distinct_cols = unique_path->numkeys;
@@ -423,38 +418,4 @@ create_index_skip_skan_path(PlannerInfo *root, UpperUniquePath *unique_path, Ind
 	}
 
 	return skip_skan_path;
-}
-
-static bool
-index_path_contains_runtime_keys(IndexPath *index_path)
-{
-	/* check if we have any runtime keys, if so, bail */
-	ListCell *clause_cell;
-	foreach(clause_cell, index_path->indexquals)
-	{
-		RestrictInfo *info = (RestrictInfo *) lfirst(clause_cell);
-		Expr *clause = info->clause;
-		if(IsA(clause, OpExpr) || IsA(clause, RowCompareExpr) || IsA(clause, ScalarArrayOpExpr))
-		{
-			Expr *leftop = (Expr *) get_leftop(clause);
-			Expr *rightop = (Expr *) get_rightop(clause);
-
-			if (leftop && IsA(leftop, RelabelType))
-				leftop = ((RelabelType *) leftop)->arg;
-
-			if (rightop && IsA(rightop, RelabelType))
-				rightop = ((RelabelType *) rightop)->arg;
-
-			bool left_ok = IsA(leftop, Var) || IsA(leftop, Const);
-			bool right_ok = IsA(rightop, Var) || IsA(rightop, Const);
-
-			if(!left_ok || !right_ok)
-					return true;
-		}
-		else if (IsA(clause, NullTest))
-			continue;
-		else
-			return true;
-	}
-	return false;
 }

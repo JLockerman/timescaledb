@@ -59,15 +59,6 @@ skip_skan_begin(CustomScanState *node, EState *estate, int eflags)
 		 */
 		if (idx->iss_NumOrderByKeys > 0)
 			elog(ERROR, "cannot SkipSkan with OrderByKeys");
-
-		/* right now we want our skip keys to be at the front of the ScanKey,
-		 * while regular IndexScans want the same for RuntimeKeys, while this
-		 * should be fixable once we teach SkipScan to remove ScanKeys from the
-		 * middle of the ScanKey, for now we just disable it.  The planner should
-		 * never plan a SkipSkan which would cause this ERROR.
-		 */
-		if (idx->iss_NumRuntimeKeys > 0)
-			elog(ERROR, "cannot SkipSkan with RuntimeKeys");
 	}
 	else if(IsA(state->idx_scan, IndexOnlyScan))
 	{
@@ -91,15 +82,6 @@ skip_skan_begin(CustomScanState *node, EState *estate, int eflags)
 		 */
 		if (idx->ioss_NumOrderByKeys > 0)
 			elog(ERROR, "cannot SkipSkan with OrderByKeys");
-
-		/* right now we want our skip keys to be at the front of the ScanKey,
-		 * while regular IndexScans want the same for RuntimeKeys, while this
-		 * should be fixable once we teach SkipScan to remove ScanKeys from the
-		 * middle of the ScanKey, for now we just disable it. The planner should
-		 * never plan a SkipSkan which would cause this ERROR.
-		 */
-		if (idx->ioss_NumRuntimeKeys > 0)
-			elog(ERROR, "cannot SkipSkan with RuntimeKeys");
 	}
 	else
 		elog(ERROR, "unknown subscan type in SkipSkan");

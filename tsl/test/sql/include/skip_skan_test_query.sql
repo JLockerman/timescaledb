@@ -42,6 +42,11 @@
     VALUES (1), (2)) a(v),
     LATERAL (SELECT DISTINCT ON (dev) * FROM test_table WHERE dev != a.v) b) a;
 
+-- RuntimeKeys
+:PREFIX SELECT time, dev, val, 's' FROM (SELECT * FROM (
+    VALUES (1), (2)) a(v),
+    LATERAL (SELECT DISTINCT ON (dev) * FROM test_table WHERE dev >= a.v) b) c;
+
 
 -- hypertable tests
 -- SkipSkan over IndexScan
@@ -82,3 +87,8 @@
 :PREFIX SELECT time, dev, val, 'r' FROM (SELECT * FROM (
     VALUES (1), (2)) a(v),
     LATERAL (SELECT DISTINCT ON (dev) * FROM test_ht WHERE dev != a.v) b) a;
+
+-- RuntimeKeys
+:PREFIX SELECT time, dev, val, 's' FROM (SELECT * FROM (
+    VALUES (1), (2)) a(v),
+    LATERAL (SELECT DISTINCT ON (dev) * FROM test_ht WHERE dev >= a.v) b) c;

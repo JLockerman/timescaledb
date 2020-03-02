@@ -57,6 +57,10 @@ CREATE INDEX ON test_ht(dev, time);
 :PREFIX SELECT time, dev, val, 'r' FROM (SELECT * FROM (
     VALUES (1), (2)) a(v),
     LATERAL (SELECT DISTINCT ON (dev) * FROM test_table WHERE dev != a.v) b) a;
+-- RuntimeKeys
+:PREFIX SELECT time, dev, val, 's' FROM (SELECT * FROM (
+    VALUES (1), (2)) a(v),
+    LATERAL (SELECT DISTINCT ON (dev) * FROM test_table WHERE dev >= a.v) b) c;
 -- hypertable tests
 -- SkipSkan over IndexScan
 :PREFIX SELECT time, dev, val, 'a' FROM (SELECT DISTINCT ON (dev) * FROM test_ht) a;
@@ -88,6 +92,10 @@ CREATE INDEX ON test_ht(dev, time);
 :PREFIX SELECT time, dev, val, 'r' FROM (SELECT * FROM (
     VALUES (1), (2)) a(v),
     LATERAL (SELECT DISTINCT ON (dev) * FROM test_ht WHERE dev != a.v) b) a;
+-- RuntimeKeys
+:PREFIX SELECT time, dev, val, 's' FROM (SELECT * FROM (
+    VALUES (1), (2)) a(v),
+    LATERAL (SELECT DISTINCT ON (dev) * FROM test_ht WHERE dev >= a.v) b) c;
 SET timescaledb.enable_skipskan TO false;
 \set PREFIX 'INSERT INTO base_results(time, dev, val, test)'
 \ir include/skip_skan_test_query.sql
@@ -124,6 +132,10 @@ SET timescaledb.enable_skipskan TO false;
 :PREFIX SELECT time, dev, val, 'r' FROM (SELECT * FROM (
     VALUES (1), (2)) a(v),
     LATERAL (SELECT DISTINCT ON (dev) * FROM test_table WHERE dev != a.v) b) a;
+-- RuntimeKeys
+:PREFIX SELECT time, dev, val, 's' FROM (SELECT * FROM (
+    VALUES (1), (2)) a(v),
+    LATERAL (SELECT DISTINCT ON (dev) * FROM test_table WHERE dev >= a.v) b) c;
 -- hypertable tests
 -- SkipSkan over IndexScan
 :PREFIX SELECT time, dev, val, 'a' FROM (SELECT DISTINCT ON (dev) * FROM test_ht) a;
@@ -155,6 +167,10 @@ SET timescaledb.enable_skipskan TO false;
 :PREFIX SELECT time, dev, val, 'r' FROM (SELECT * FROM (
     VALUES (1), (2)) a(v),
     LATERAL (SELECT DISTINCT ON (dev) * FROM test_ht WHERE dev != a.v) b) a;
+-- RuntimeKeys
+:PREFIX SELECT time, dev, val, 's' FROM (SELECT * FROM (
+    VALUES (1), (2)) a(v),
+    LATERAL (SELECT DISTINCT ON (dev) * FROM test_ht WHERE dev >= a.v) b) c;
 SELECT (skip_skan_results).* skip_skan, (base_results).* base
 FROM skip_skan_results FULL JOIN base_results ON skip_skan_results.idx = base_results.idx
 WHERE skip_skan_results.time != base_results.time

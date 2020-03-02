@@ -225,6 +225,19 @@ CREATE INDEX ON test_ht(dev, time);
                Filter: (dev <> "*VALUES*".column1)
 (6 rows)
 
+-- RuntimeKeys
+:PREFIX SELECT time, dev, val, 's' FROM (SELECT * FROM (
+    VALUES (1), (2)) a(v),
+    LATERAL (SELECT DISTINCT ON (dev) * FROM test_table WHERE dev >= a.v) b) c;
+                                    QUERY PLAN                                     
+-----------------------------------------------------------------------------------
+ Nested Loop
+   ->  Values Scan on "*VALUES*"
+   ->  Custom Scan (SkipSkan) on test_table
+         ->  Index Scan using test_table_dev_time_idx on test_table
+               Index Cond: ((dev > NULL::integer) AND (dev >= "*VALUES*".column1))
+(5 rows)
+
 -- hypertable tests
 -- SkipSkan over IndexScan
 :PREFIX SELECT time, dev, val, 'a' FROM (SELECT DISTINCT ON (dev) * FROM test_ht) a;
@@ -741,6 +754,34 @@ CREATE INDEX ON test_ht(dev, time);
                            Filter: (dev <> "*VALUES*".column1)
 (25 rows)
 
+-- RuntimeKeys
+:PREFIX SELECT time, dev, val, 's' FROM (SELECT * FROM (
+    VALUES (1), (2)) a(v),
+    LATERAL (SELECT DISTINCT ON (dev) * FROM test_ht WHERE dev >= a.v) b) c;
+                                          QUERY PLAN                                           
+-----------------------------------------------------------------------------------------------
+ Nested Loop
+   ->  Values Scan on "*VALUES*"
+   ->  Unique
+         ->  Merge Append
+               Sort Key: _hyper_1_1_chunk.dev
+               ->  Custom Scan (SkipSkan) on _hyper_1_1_chunk
+                     ->  Index Scan using _hyper_1_1_chunk_dev_time_idx on _hyper_1_1_chunk
+                           Index Cond: ((dev > NULL::integer) AND (dev >= "*VALUES*".column1))
+               ->  Custom Scan (SkipSkan) on _hyper_1_2_chunk
+                     ->  Index Scan using _hyper_1_2_chunk_dev_time_idx on _hyper_1_2_chunk
+                           Index Cond: ((dev > NULL::integer) AND (dev >= "*VALUES*".column1))
+               ->  Custom Scan (SkipSkan) on _hyper_1_3_chunk
+                     ->  Index Scan using _hyper_1_3_chunk_dev_time_idx on _hyper_1_3_chunk
+                           Index Cond: ((dev > NULL::integer) AND (dev >= "*VALUES*".column1))
+               ->  Custom Scan (SkipSkan) on _hyper_1_4_chunk
+                     ->  Index Scan using _hyper_1_4_chunk_dev_time_idx on _hyper_1_4_chunk
+                           Index Cond: ((dev > NULL::integer) AND (dev >= "*VALUES*".column1))
+               ->  Custom Scan (SkipSkan) on _hyper_1_5_chunk
+                     ->  Index Scan using _hyper_1_5_chunk_dev_time_idx on _hyper_1_5_chunk
+                           Index Cond: ((dev > NULL::integer) AND (dev >= "*VALUES*".column1))
+(20 rows)
+
 -- don't SkipSkan with an invalid ORDER BY
 :PREFIX SELECT time, dev, val, 'd' FROM (SELECT DISTINCT ON (dev) * FROM test_ht ORDER BY dev DESC, time) a;
                                  QUERY PLAN                                 
@@ -771,17 +812,4 @@ CREATE INDEX ON test_ht(dev, time);
                      ->  Seq Scan on _hyper_1_4_chunk
                      ->  Seq Scan on _hyper_1_5_chunk
 (10 rows)
-
--- Doesn't SkipSkan with RuntimeKeys
-EXPLAIN (COSTS off) SELECT * FROM (
-    VALUES (1), (2)) a(v),
-    LATERAL (SELECT DISTINCT ON (dev) * FROM test_table WHERE dev >= a.v) b;
-                             QUERY PLAN                             
---------------------------------------------------------------------
- Nested Loop
-   ->  Values Scan on "*VALUES*"
-   ->  Unique
-         ->  Index Scan using test_table_dev_time_idx on test_table
-               Index Cond: (dev >= "*VALUES*".column1)
-(5 rows)
 

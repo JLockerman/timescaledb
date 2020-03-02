@@ -29,8 +29,3 @@ CREATE INDEX ON test_ht(dev, time);
 -- don't SkipSkan with an invalid ORDER BY
 :PREFIX SELECT time, dev, val, 'd' FROM (SELECT DISTINCT ON (dev) * FROM test_ht ORDER BY dev DESC, time) a;
 :PREFIX SELECT time, dev, val, 'd' FROM (SELECT DISTINCT ON (dev) * FROM test_ht ORDER BY dev, time DESC) a;
-
--- Doesn't SkipSkan with RuntimeKeys
-EXPLAIN (COSTS off) SELECT * FROM (
-    VALUES (1), (2)) a(v),
-    LATERAL (SELECT DISTINCT ON (dev) * FROM test_table WHERE dev >= a.v) b;
