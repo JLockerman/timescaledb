@@ -499,11 +499,11 @@ ts_skip_skan_state_create(CustomScan *cscan)
 
 	state->idx_scan = linitial(cscan->custom_plans);
 
-	state->distinct_col_attnum = lsecond_int(cscan->custom_private);
+	state->distinct_col_attnum = linitial_int(cscan->custom_private);
 
-	state->distinct_by_val = lthird_int(cscan->custom_private);
+	state->distinct_by_val = lsecond_int(cscan->custom_private);
 
-	state->distinct_typ_len = lfourth_int(cscan->custom_private);
+	state->distinct_typ_len = lthird_int(cscan->custom_private);
 
 	state->cscan_state.methods = &skip_skan_state_methods;
 	return (Node *)state;

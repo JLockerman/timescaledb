@@ -34,106 +34,18 @@
 #include "license.h"
 #include "nodes/skip_skan/skip_skan.h"
 
+static EquivalenceMember *find_ec_member_for_tle(EquivalenceClass *ec, TargetEntry *tle, Relids relids);
+static AttrNumber *find_column_from_tlist(List *target_list, PathKey *pathkey);
+
+
+/**************************
+ * SkipSkan Plan Creation *
+ **************************/
 
 static CustomScanMethods skip_skan_plan_methods = {
 	.CustomName = "SkipSkan",
 	.CreateCustomScanState = ts_skip_skan_state_create,
 };
-
-static EquivalenceMember *
-find_ec_member_for_tle(EquivalenceClass *ec, TargetEntry *tle, Relids relids)
-{
-	Expr       *tlexpr;
-	ListCell   *lc;
-
-	/* We ignore binary-compatible relabeling on both ends */
-	tlexpr = tle->expr;
-	while (tlexpr && IsA(tlexpr, RelabelType))
-		tlexpr = ((RelabelType *) tlexpr)->arg;
-
-	foreach(lc, ec->ec_members)
-	{
-		EquivalenceMember *em = (EquivalenceMember *) lfirst(lc);
-		Expr       *emexpr;
-
-		/*
-		* We shouldn't be trying to sort by an equivalence class that
-		* contains a constant, so no need to consider such cases any further.
-		*/
-		if (em->em_is_const)
-			continue;
-
-		/*
-		* Ignore child members unless they belong to the rel being sorted.
-		*/
-		//TODO check with HT
-		// if (em->em_is_child &&
-		// 	!bms_is_subset(em->em_relids, relids))
-		// 	continue;
-
-		/* Match if same expression (after stripping relabel) */
-		emexpr = em->em_expr;
-		while (emexpr && IsA(emexpr, RelabelType))
-			emexpr = ((RelabelType *) emexpr)->arg;
-
-		if (equal(emexpr, tlexpr))
-			return em;
-	}
-
-	return NULL;
-}
-
-static int *
-find_columns_from_tlist(List *target_list, List *pathkeys, int num_skip_clauses)
-{
-	int *distinct_columns = palloc0(sizeof(*distinct_columns) * num_skip_clauses);
-	Assert(pathkeys != NIL);
-	int keyno = 0;
-	ListCell *lc;
-	foreach(lc, pathkeys)
-	{
-		if (keyno >= num_skip_clauses)
-			break;
-		PathKey *pathkey = (PathKey *) lfirst(lc);
-		EquivalenceClass *ec = pathkey->pk_eclass;
-		TargetEntry *tle = NULL;
-		if (ec->ec_has_volatile)
-		{
-			/*
-			 * If the pathkey's EquivalenceClass is volatile, then it must
-			 * have come from an ORDER BY clause, and we have to match it to
-			 * that same targetlist entry.
-			 */
-			if (ec->ec_sortref == 0)    /* can't happen */
-				elog(ERROR, "volatile EquivalenceClass has no sortref");
-			tle = get_sortgroupref_tle(ec->ec_sortref, target_list);
-			Assert(tle);
-			Assert(list_length(ec->ec_members) == 1);
-		}
-		else
-		{
-			/*
-			* Otherwise, we can use any non-constant expression listed in the
-			* pathkey's EquivalenceClass.  For now, we take the first tlist
-			* item found in the EC.
-			*/
-			ListCell   *j;
-			foreach(j, target_list)
-			{
-				tle = (TargetEntry *) lfirst(j);
-				if (find_ec_member_for_tle(ec, tle, NULL))
-					break;
-				tle = NULL;
-			}
-		}
-
-		if (!tle)
-			elog(ERROR, "could not find pathkey item to sort");
-		distinct_columns[keyno] = tle->resno;
-		keyno += 1;
-	}
-	return distinct_columns;
-}
 
 static Plan *
 skip_skan_plan_create(PlannerInfo *root, RelOptInfo *relopt, CustomPath *best_path,
@@ -141,22 +53,19 @@ skip_skan_plan_create(PlannerInfo *root, RelOptInfo *relopt, CustomPath *best_pa
 {
 	SkipSkanPath *path = (SkipSkanPath *) best_path;
 	CustomScan *skip_plan = makeNode(CustomScan);
-	int num_skip_clauses = list_length(path->comparison_clauses);
 	IndexPath *index_path = path->index_path;
 
 	/* technically our placeholder col > NULL is unsatisfiable, and in some instances
 	 * the planner will realize this and use is as an excuse to remove other quals.
 	 * in order to prevent this, we prepare this qual ourselves.
 	 */
-	List *stripped_comparison_clauses = get_actual_clauses(path->comparison_clauses);
+	List *stripped_skip_clauses = get_actual_clauses(list_make1(path->skip_clause));
 
-	List *fixed_comparison_clauses = NIL;
+	List *fixed_skip_clauses = NIL;
 	/* fix_indexqual_references */
-	ListCell *qual_cell, *col_cell;
-	forboth(qual_cell, path->comparison_clauses, col_cell, path->comparison_columns)
 	{
-		RestrictInfo *rinfo = lfirst_node(RestrictInfo, qual_cell);
-		int indexcol = lfirst_int(col_cell);
+		RestrictInfo *rinfo = path->skip_clause;
+		int indexcol = path->distinct_column;
 		IndexOptInfo *index = index_path->indexinfo;
 		OpExpr *op = copyObject(castNode(OpExpr, rinfo->clause));
 		 castNode(OpExpr, copyObject(rinfo->clause));
@@ -174,7 +83,7 @@ skip_skan_plan_create(PlannerInfo *root, RelOptInfo *relopt, CustomPath *best_pa
 		result->varattno = indexcol + 1;
 
 		linitial(op->args) = result;
-		fixed_comparison_clauses = lappend(fixed_comparison_clauses, op);
+		fixed_skip_clauses = lappend(fixed_skip_clauses, op);
 	}
 
 	Plan *plan = create_plan(root, &index_path->path);
@@ -183,24 +92,23 @@ skip_skan_plan_create(PlannerInfo *root, RelOptInfo *relopt, CustomPath *best_pa
 	{
 		IndexScan *idx_plan = castNode(IndexScan, plan);
 		skip_plan->scan = idx_plan->scan;
-		idx_plan->indexqual = list_concat(fixed_comparison_clauses, idx_plan->indexqual);
-		idx_plan->indexqualorig = list_concat(stripped_comparison_clauses, idx_plan->indexqualorig);
+		idx_plan->indexqual = list_concat(fixed_skip_clauses, idx_plan->indexqual);
+		idx_plan->indexqualorig = list_concat(stripped_skip_clauses, idx_plan->indexqualorig);
 	}
 	else if (IsA(plan, IndexOnlyScan))
 	{
 		IndexOnlyScan *idx_plan = castNode(IndexOnlyScan, plan);
 		skip_plan->scan = idx_plan->scan;
-		idx_plan->indexqual = list_concat(fixed_comparison_clauses, idx_plan->indexqual);
+		idx_plan->indexqual = list_concat(fixed_skip_clauses, idx_plan->indexqual);
 	}
 	else
-		elog(ERROR, "bad plan");
-	/* based on make_unique_from_pathkeys */
+		elog(ERROR, "bad subplan type fpr SkipSkan: %d", plan->type);
 
-	//FIXME do we need the byVal and size from here?
-	//      what order are the columns returned in?
-	int *distinct_columns = find_columns_from_tlist(plan->targetlist,
-		best_path->path.pathkeys,
-		num_skip_clauses);
+	/* based on make_unique_from_pathkeys */
+	AttrNumber *distinct_columns = find_column_from_tlist(plan->targetlist,
+		linitial(best_path->path.pathkeys));
+	if (distinct_columns == NULL)
+		elog(ERROR, "Invalid skip column in SkipSkanPath; could not find in tlist");
 
 	skip_plan->custom_scan_tlist = plan->targetlist;
 	skip_plan->scan.plan.qual = NIL;
@@ -209,11 +117,15 @@ skip_skan_plan_create(PlannerInfo *root, RelOptInfo *relopt, CustomPath *best_pa
 	skip_plan->scan.plan.parallel_aware = false;
 	skip_plan->methods = &skip_skan_plan_methods;
 	skip_plan->custom_plans = list_make1(plan);
-	//FIXME single col
-	skip_plan->custom_private = list_make4(num_skip_clauses, distinct_columns[0], path->distinct_by_val[0], path->distinct_typ_len[0]);
+	skip_plan->custom_private = list_make3_int(*distinct_columns, path->distinct_by_val, path->distinct_typ_len);
 	return &skip_plan->scan.plan;
 }
 
+
+
+/*************************
+ * SkipSkanPath Creation *
+ *************************/
 static CustomPathMethods skip_skan_path_methods = {
 	.CustomName = "SkipSkanPath",
 	.PlanCustomPath = skip_skan_plan_create,
@@ -341,10 +253,6 @@ create_index_skip_skan_path(PlannerInfo *root, UpperUniquePath *unique_path, Ind
 	// skip_skan_path->cpath.custom_paths = list_make1(index_path);
 	skip_skan_path->cpath.methods = &skip_skan_path_methods;
 	skip_skan_path->index_path = index_path;
-	skip_skan_path->num_distinct_cols = num_distinct_cols;
-	skip_skan_path->comparison_clauses = NIL;
-	skip_skan_path->distinct_by_val = palloc(sizeof(*skip_skan_path->distinct_by_val) * num_distinct_cols);
-	skip_skan_path->distinct_typ_len = palloc(sizeof(*skip_skan_path->distinct_typ_len) * num_distinct_cols);
 	Assert(num_distinct_cols <= index_path->indexinfo->nkeycolumns);
 
 	IndexOptInfo *idx_info = index_path->indexinfo;
@@ -352,70 +260,158 @@ create_index_skip_skan_path(PlannerInfo *root, UpperUniquePath *unique_path, Ind
 	Oid rel_oid = root->simple_rte_array[rel_index]->relid;
 
 	/* find the ordering operator we'll use to skip around each key column */
-	for(int col = 0; col < num_distinct_cols; col++)
+	PathKey *first_pathkey = linitial(index_path->path.pathkeys);
+
+	AttrNumber *col_num = find_column_from_tlist(idx_info->indextlist, first_pathkey);
+	if(col_num == NULL)
+		elog(ERROR, "could not find col for SkipSKan");
+
+	int col = AttrNumberGetAttrOffset(*col_num);
+	/* we do not yet handle SkipSkans on keys other than the first key of the index */
+	if (col != 0)
+		return NULL;
+
+	int table_col = idx_info->indexkeys[col];
+	if(table_col == 0)
+		return NULL; /* cannot use this index */
+
+	HeapTuple column_tuple = SearchSysCache2(ATTNUM,
+		ObjectIdGetDatum(rel_oid),
+		Int16GetDatum(table_col));
+	if (!HeapTupleIsValid(column_tuple))
+		return NULL; /* cannot use this index */
+
+	Form_pg_attribute att_tup = (Form_pg_attribute) GETSTRUCT(column_tuple);
+
+	Oid column_type = att_tup->atttypid;
+	int32 column_typmod = att_tup->atttypmod;
+	Oid column_collation = att_tup->attcollation;
+
+	skip_skan_path->distinct_by_val = att_tup->attbyval;
+	skip_skan_path->distinct_typ_len = att_tup->attlen;
+	ReleaseSysCache(column_tuple);
+	if(!OidIsValid(column_type))
+		return NULL; /* cannot use this index */
+
+	Oid btree_opfamily = idx_info->sortopfamily[col];
+
+	int16 strategy = idx_info->reverse_sort[col] ? BTLessStrategyNumber: BTGreaterStrategyNumber;
+	if (index_path->indexscandir == BackwardScanDirection)
 	{
-		IndexOptInfo *idx_info = index_path->indexinfo;
-		/* this is a bit of a hack: the Unique node will deduplicate based
-		 * off the sort based off of the first numkeys of the path's pathkeys,
-		 * working under the assumption that its subpath will return things
-		 * in that order. Instead of looking through the pathkeys to
-		 * determine the columns being deduplicated on, we assume that the
-		 * index's column order will match that
-		 */
-		int table_col = idx_info->indexkeys[col];
-		if(table_col == 0)
-			return NULL; /* cannot use this index */
-
-		HeapTuple column_tuple = SearchSysCache2(ATTNUM,
-			ObjectIdGetDatum(rel_oid),
-			Int16GetDatum(table_col));
-		if (!HeapTupleIsValid(column_tuple))
-			return NULL; /* cannot use this index */
-
-		Form_pg_attribute att_tup = (Form_pg_attribute) GETSTRUCT(column_tuple);
-
-		Oid column_type = att_tup->atttypid;
-		int32 column_typmod = att_tup->atttypmod;
-		Oid column_collation = att_tup->attcollation;
-
-		skip_skan_path->distinct_by_val[col] = att_tup->attbyval;
-		skip_skan_path->distinct_typ_len[col] = att_tup->attlen;
-		ReleaseSysCache(column_tuple);
-		if(!OidIsValid(column_type))
-			return NULL; /* cannot use this index */
-
-		Oid btree_opfamily = idx_info->sortopfamily[col];
-		//FIXME check other index types and reverse
-		int16 strategy = idx_info->reverse_sort[col] ? BTLessStrategyNumber: BTGreaterStrategyNumber;
-		if (index_path->indexscandir == BackwardScanDirection)
-		{
-			strategy = (strategy == BTLessStrategyNumber) ? BTGreaterStrategyNumber: BTLessStrategyNumber;
-		}
-		Oid comparator = get_opfamily_member(btree_opfamily, column_type, column_type, strategy);
-		if (!OidIsValid(comparator))
-			return NULL; /* cannot use this index */
-
-		//TODO should this be a Const or a Var?
-		Const *prev_val = makeNullConst(column_type, column_typmod, column_collation);
-		Var *current_val = makeVar(rel_index /*varno*/,
-			table_col /*varattno*/,
-			column_type /*vartype*/,
-			column_typmod /*vartypmod*/,
-			column_collation /*varcollid*/,
-			0 /*varlevelsup*/);
-
-		Expr *comparsion_expr = make_opclause(comparator,
-			BOOLOID /*opresulttype*/,
-			false /*opretset*/,
-			&current_val->xpr /*leftop*/,
-			&prev_val->xpr /*rightop*/,
-			InvalidOid /*opcollid*/,
-			idx_info->indexcollations[col] /*inputcollid*/);
-		set_opfuncid(castNode(OpExpr, comparsion_expr));
-		RestrictInfo *clause = make_simple_restrictinfo(comparsion_expr);
-		skip_skan_path->comparison_clauses = lappend(skip_skan_path->comparison_clauses, clause);
-		skip_skan_path->comparison_columns = lappend_int(skip_skan_path->comparison_columns, col);
+		strategy = (strategy == BTLessStrategyNumber) ? BTGreaterStrategyNumber: BTLessStrategyNumber;
 	}
+	Oid comparator = get_opfamily_member(btree_opfamily, column_type, column_type, strategy);
+	if (!OidIsValid(comparator))
+		return NULL; /* cannot use this index */
+
+	Const *prev_val = makeNullConst(column_type, column_typmod, column_collation);
+	Var *current_val = makeVar(rel_index /*varno*/,
+		table_col /*varattno*/,
+		column_type /*vartype*/,
+		column_typmod /*vartypmod*/,
+		column_collation /*varcollid*/,
+		0 /*varlevelsup*/);
+
+	Expr *comparsion_expr = make_opclause(comparator,
+		BOOLOID /*opresulttype*/,
+		false /*opretset*/,
+		&current_val->xpr /*leftop*/,
+		&prev_val->xpr /*rightop*/,
+		InvalidOid /*opcollid*/,
+		idx_info->indexcollations[col] /*inputcollid*/);
+	set_opfuncid(castNode(OpExpr, comparsion_expr));
+	RestrictInfo *clause = make_simple_restrictinfo(comparsion_expr);
+	skip_skan_path->skip_clause = clause;
+	skip_skan_path->distinct_column = col;
 
 	return skip_skan_path;
+}
+
+
+/************
+ * Utilites *
+ ************/
+
+static AttrNumber *
+find_column_from_tlist(List *target_list, PathKey *pathkey)
+{
+	EquivalenceClass *ec = pathkey->pk_eclass;
+	TargetEntry *tle = NULL;
+	if (ec->ec_has_volatile)
+	{
+		/*
+			* If the pathkey's EquivalenceClass is volatile, then it must
+			* have come from an ORDER BY clause, and we have to match it to
+			* that same targetlist entry.
+			*/
+		if (ec->ec_sortref == 0)    /* can't happen */
+			elog(ERROR, "volatile EquivalenceClass has no sortref");
+		tle = get_sortgroupref_tle(ec->ec_sortref, target_list);
+		Assert(tle);
+		Assert(list_length(ec->ec_members) == 1);
+	}
+	else
+	{
+		/*
+		* Otherwise, we can use any non-constant expression listed in the
+		* pathkey's EquivalenceClass.  For now, we take the first tlist
+		* item found in the EC.
+		*/
+		ListCell   *j;
+		foreach(j, target_list)
+		{
+			tle = (TargetEntry *) lfirst(j);
+			if (find_ec_member_for_tle(ec, tle, NULL))
+				break;
+			tle = NULL;
+		}
+	}
+
+	if (!tle)
+		return NULL;
+
+	return &tle->resno;
+}
+
+static EquivalenceMember *
+find_ec_member_for_tle(EquivalenceClass *ec, TargetEntry *tle, Relids relids)
+{
+	Expr       *tlexpr;
+	ListCell   *lc;
+
+	/* We ignore binary-compatible relabeling on both ends */
+	tlexpr = tle->expr;
+	while (tlexpr && IsA(tlexpr, RelabelType))
+		tlexpr = ((RelabelType *) tlexpr)->arg;
+
+	foreach(lc, ec->ec_members)
+	{
+		EquivalenceMember *em = (EquivalenceMember *) lfirst(lc);
+		Expr       *emexpr;
+
+		/*
+		* We shouldn't be trying to sort by an equivalence class that
+		* contains a constant, so no need to consider such cases any further.
+		*/
+		if (em->em_is_const)
+			continue;
+
+		/*
+		* Ignore child members unless they belong to the rel being sorted.
+		*/
+		//TODO check with HT
+		// if (em->em_is_child &&
+		// 	!bms_is_subset(em->em_relids, relids))
+		// 	continue;
+
+		/* Match if same expression (after stripping relabel) */
+		emexpr = em->em_expr;
+		while (emexpr && IsA(emexpr, RelabelType))
+			emexpr = ((RelabelType *) emexpr)->arg;
+
+		if (equal(emexpr, tlexpr))
+			return em;
+	}
+
+	return NULL;
 }

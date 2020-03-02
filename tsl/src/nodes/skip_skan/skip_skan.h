@@ -34,17 +34,19 @@ typedef struct SkipSkanState
 	/* Interior Index(Only)Scan the SkipSkan runs over */
 	ScanState *idx;
 
+	/* Pointers into the Index(Only)Scan */
 	int *num_scan_keys;
 	ScanKey *scan_keys;
+	Buffer *index_only_buffer;
+	bool *reached_end;
 
-	int distinct_col_attnum;
-	bool distinct_by_val;
-	int distinct_typ_len;
 	Datum prev_distinct_val;
 	bool prev_is_null;
 
-	Buffer *index_only_buffer;
-	bool *reached_end;
+	/* Info about the type we are performing DISTINCT on */
+	bool distinct_by_val;
+	int distinct_col_attnum;
+	int distinct_typ_len;
 
 	SkipSkanStage stage;
 	bool skip_qual_removed;
@@ -54,17 +56,17 @@ typedef struct SkipSkanState
 	void *idx_scan;
 } SkipSkanState;
 
-
 typedef struct SkipSkanPath
 {
 	CustomPath cpath;
 	IndexPath *index_path;
-	int num_distinct_cols;
-	/* list of index clauses (RestricInfo *) which we'll use to skip past elements we've already seen */
-	List *comparison_clauses;
-	List *comparison_columns;
-	bool *distinct_by_val;
-	int *distinct_typ_len;
+
+	/* Index clause which we'll use to skip past elements we've already seen */
+	RestrictInfo *skip_clause;
+	/* The column offset, on the index, of the column we are calling DISTINCT on */
+	int distinct_column;
+	int distinct_typ_len;
+	bool distinct_by_val;
 } SkipSkanPath;
 
 extern void ts_add_skip_skan_paths(PlannerInfo *root, RelOptInfo *output_rel);
