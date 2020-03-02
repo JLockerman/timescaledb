@@ -51,30 +51,11 @@
  */
 
 #include <postgres.h>
-#include <access/htup_details.h>
-#include <access/visibilitymap.h>
-#include <catalog/pg_type.h>
 #include <executor/nodeIndexscan.h>
 #include <executor/nodeIndexOnlyscan.h>
-#include <miscadmin.h>
-#include <nodes/execnodes.h>
 #include <nodes/extensible.h>
-#include <nodes/nodeFuncs.h>
-#include <nodes/makefuncs.h>
 #include <nodes/pg_list.h>
-#include <optimizer/clauses.h>
-#include <optimizer/pathnode.h>
-#include <optimizer/paths.h>
-#include <optimizer/paramassign.h>
-#include <optimizer/planmain.h>
-#include <optimizer/planner.h>
-#include <optimizer/restrictinfo.h>
-#include <optimizer/tlist.h>
-#include <storage/predicate.h>
 #include <utils/datum.h>
-#include <utils/lsyscache.h>
-#include <utils/syscache.h>
-#include <parser/parse_func.h>
 
 #include "guc.h"
 #include "license.h"
