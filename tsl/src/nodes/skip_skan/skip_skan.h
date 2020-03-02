@@ -12,13 +12,18 @@
 #include <nodes/execnodes.h>
 #include <optimizer/planner.h>
 
-typedef enum SkipColumnState
+typedef enum SkipSkanStage
 {
-	SkipColumnFoundNothing = 0x0,
-	SkipColumnFoundVal = 0x1,
-	SkipColumnFoundNull = 0x2,
-	SkipColumnFoundValAndNull = SkipColumnFoundNull | SkipColumnFoundVal,
-} SkipColumnState;
+	SkipSkanSearchingForFirst = 0x0,
+	SkipSkanFoundNull = 0x1,
+	SkipSkanFoundVal = 0x2,
+	SkipSkanSearchingForAdditional = 0x4,
+
+	SkipSkanSearchingForNull = SkipSkanSearchingForAdditional | SkipSkanFoundVal,
+	SkipSkanSearchingForVal = SkipSkanSearchingForAdditional | SkipSkanFoundNull,
+
+	SkipSkanFoundNullAndVal = SkipSkanFoundVal | SkipSkanFoundNull,
+} SkipSkanStage;
 
 typedef struct SkipSkanState
 {
@@ -38,13 +43,11 @@ typedef struct SkipSkanState
 	Datum prev_distinct_val;
 	bool prev_is_null;
 
-	SkipColumnState distinct_col_state;
-
 	Buffer *index_only_buffer;
 	bool *reached_end;
 
-	bool found_first_tuple;
-	bool distinct_col_updated;
+	SkipSkanStage stage;
+	bool skip_qual_removed;
 	bool index_only_scan;
 
 	Relation index_rel;

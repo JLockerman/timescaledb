@@ -88,17 +88,77 @@ skip_skan_begin(CustomScanState *node, EState *estate, int eflags)
 
 	state->prev_distinct_val = 0;
 	state->prev_is_null = true;
-	state->distinct_col_state = SkipColumnFoundNothing;
-	state->found_first_tuple = false;
-	state->distinct_col_updated = false;
+	state->stage = SkipSkanSearchingForFirst;
+	state->skip_qual_removed = false;
 }
 
+static void skip_skan_state_beginscan(SkipSkanState *state);
 static void update_skip_key(SkipSkanState *state, TupleTableSlot *slot);
 static TupleTableSlot *skip_skan_search_for_null(SkipSkanState *state);
 static TupleTableSlot *skip_skan_search_for_nonnull(SkipSkanState *state);
 
 static void skip_skan_state_remove_skip_qual(SkipSkanState *state);
-static inline void skip_skan_state_readd_skip_qual_if_needed(SkipSkanState *state);
+static inline bool skip_skan_state_readd_skip_qual_if_needed(SkipSkanState *state);
+static inline void skip_skan_state_populate_skip_qual(SkipSkanState *state);
+
+
+/****************************
+ * small accessor functions *
+ ****************************/
+
+static inline bool
+skip_skan_is_searching_for_first_val(SkipSkanState *state)
+{
+	return state->stage == SkipSkanSearchingForFirst;
+}
+
+static inline bool
+skip_skan_state_found_null(SkipSkanState *state)
+{
+	return (state->stage & SkipSkanFoundNull) != 0;
+}
+
+static inline bool
+skip_skan_state_found_val(SkipSkanState *state)
+{
+	return (state->stage & SkipSkanFoundVal) != 0;
+}
+
+static inline bool
+skip_skan_state_found_everything(SkipSkanState *state)
+{
+	return (state->stage & SkipSkanFoundNullAndVal) == SkipSkanFoundNullAndVal;
+}
+
+static inline bool
+skip_skan_state_is_searching_for_null(SkipSkanState *state)
+{
+	return (state->stage & SkipSkanSearchingForNull) == SkipSkanSearchingForNull;
+}
+
+static inline bool
+skip_skan_state_is_searching_for_val(SkipSkanState *state)
+{
+	return (state->stage & SkipSkanSearchingForVal) == SkipSkanSearchingForVal;
+}
+
+static inline bool
+skip_skan_is_finished(SkipSkanState *state)
+{
+	/*
+	 * Once the underlying Index(Only)Scan runs out of tuples,
+	 * we're not going to find anything more if
+	 *  1. We're searching for first, and found nothing:
+	 *     the regular qual must exclude everything
+	 *  2. We're searching for a NULL, but have not found one:
+	 *     we must have already found a non-NULL val, and be searching for a final NULL
+	 *  3. We're searching for a non-NULL, but have not found one:
+	 *     we must have already found a NULL val, and be searching for non-NULL ones
+	 */
+	return (state->stage & SkipSkanFoundNullAndVal) == 0
+		|| (skip_skan_state_is_searching_for_val(state) && !skip_skan_state_found_val(state))
+		|| (skip_skan_state_is_searching_for_null(state) && !skip_skan_state_found_null(state));
+}
 
 static inline IndexScanDesc
 skip_skan_state_get_scandesc(SkipSkanState *state)
@@ -113,10 +173,103 @@ skip_skan_state_get_scankeys(SkipSkanState *state)
 }
 
 static inline ScanKey
-skip_skan_state_get_scankey(SkipSkanState *state, int idx)
+skip_skan_state_get_skipkey(SkipSkanState *state)
 {
-	Assert(idx < *state->num_scan_keys);
-	return &skip_skan_state_get_scankeys(state)[idx];
+	Assert(!state->skip_qual_removed);
+	Assert(*state->num_scan_keys > 0);
+	return skip_skan_state_get_scankeys(state);
+}
+
+
+/*******************************
+ * Primary Execution Functions *
+ *******************************/
+
+static TupleTableSlot *
+skip_skan_exec(CustomScanState *node)
+{
+	SkipSkanState *state = (SkipSkanState *)node;
+	TupleTableSlot *result;
+
+	if (skip_skan_is_searching_for_first_val(state))
+	{
+		Assert(skip_skan_state_get_scandesc(state) == NULL);
+		/* first time through we ignore the inital scan keys, which are used to
+		 * skip previously seen values, we'll change back the number of scan keys
+		 * the first time through update_skip_key
+		 */
+		skip_skan_state_remove_skip_qual(state);
+		skip_skan_state_beginscan(state);
+
+		/* ignore the first scan key, which is the qual we add to skip repeat
+		 * values, the other quals still need to be applied. We'll set this back
+		 * once we have the inital values, and our qual can be applied.
+		 */
+		index_rescan(skip_skan_state_get_scandesc(state),
+			skip_skan_state_get_scankeys(state),
+			*state->num_scan_keys,
+			NULL /*orderbys*/,
+			0 /*norderbys*/);
+	}
+	else
+	{
+		/* in subsequent calls we rescan based on the previously found element
+		 * which will have been set below in update_skip_key
+		 */
+		bool skip_qual_was_removed = skip_skan_state_readd_skip_qual_if_needed(state);
+		/* if the skip qual was just readded, we need to restart the indexscan to
+		 * to tell it about the new qual
+		 */
+		if (skip_qual_was_removed)
+			skip_skan_state_beginscan(state);
+
+		skip_skan_state_populate_skip_qual(state);
+		/* rescan the index based on the new distinct value */
+		index_rescan(skip_skan_state_get_scandesc(state),
+			skip_skan_state_get_scankeys(state),
+			*state->num_scan_keys,
+			NULL /*orderbys*/,
+			0 /*norderbys*/);
+	}
+
+	/* get the next node from the underlying Index(Only)Scan */
+	result = state->idx->ps.ExecProcNode(&state->idx->ps);
+	bool index_scan_finished = TupIsNull(result);
+	if (!index_scan_finished)
+	{
+		/* rescan can invalidate tuples, so if we're below a MergeAppend, we need
+		 * to materialize the slot to ensure it won't be freed. (Technically, we
+		 * do not need to do this if we're directly below the Unique node)
+		 */
+		ExecMaterializeSlot(result);
+		update_skip_key(state, result);
+	}
+	else if (skip_skan_state_found_everything(state))
+		return result;
+	else if (skip_skan_is_finished(state))
+		return result; /* the non-skip-quals exclude everything remaining */
+	else
+	{
+		/* We've run out of tuples from the underlying scan, but we may not be done.
+		 * NULL values don't participate in the normal ordering of values
+		 * (eg. in SQL column < NULL will never be true, and column < value
+		 * implies column IS NOT NULL), so they have to be handled specially.
+		 * Further, NULL values can be returned either before or after the other
+		 * values in the column depending on whether the index was declaed
+		 * NULLS FIRST or NULLS LAST. Therefore just because we've reached the
+		 * end of the IndexScan doesn't mean we're done; if we've only seen NULL
+		 * values that means we may be in a NULLS FIRST index, and we need to
+		 * check if a non-null value exists. Alternatively, if we haven't seen a
+		 * NULL, we may be in a NULLS LAST column, so we need to check if a NULL
+		 * value exists.
+		 */
+		if(!skip_skan_state_found_null(state))
+			return skip_skan_search_for_null(state);
+		else if (!skip_skan_state_found_val(state))
+			return skip_skan_search_for_nonnull(state);
+	}
+
+	return result;
 }
 
 /* end the previous ScanDesc, if it exists, and start a new one. We call this
@@ -149,92 +302,13 @@ skip_skan_state_beginscan(SkipSkanState *state)
 }
 
 static TupleTableSlot *
-skip_skan_exec(CustomScanState *node)
-{
-	SkipSkanState *state = (SkipSkanState *)node;
-	TupleTableSlot *result;
-
-	if (skip_skan_state_get_scandesc(state) == NULL)
-	{
-		/* first time through we ignore the inital scan keys, which are used to
-		 * skip previously seen values, we'll change back the number of scan keys
-		 * the first time through update_skip_key
-		 */
-		skip_skan_state_remove_skip_qual(state);
-		skip_skan_state_beginscan(state);
-
-		/* ignore the first scan key, which is the qual we add to skip repeat
-		 * values, the other quals still need to be applied. We'll set this back
-		 * once we have the inital values, and our qual can be applied.
-		 */
-		index_rescan(skip_skan_state_get_scandesc(state),
-			skip_skan_state_get_scankeys(state),
-			*state->num_scan_keys,
-			NULL /*orderbys*/,
-			0 /*norderbys*/);
-	}
-	else if (state->distinct_col_updated)
-	{
-		/* in subsequent call we rescan based on the previously found element
-		 * which will have been set below in update_skip_key
-		 */
-		index_rescan(skip_skan_state_get_scandesc(state),
-			skip_skan_state_get_scankeys(state),
-			*state->num_scan_keys,
-			NULL /*orderbys*/,
-			0 /*norderbys*/);
-	}
-
-	/* get the next node from the underlying Index(Only)Scan */
-	result = state->idx->ps.ExecProcNode(&state->idx->ps);
-	bool index_scan_finished = TupIsNull(result);
-	if (!index_scan_finished)
-	{
-		/* rescan can invalidate tuples, so if we're below a MergeAppend, we need
-		 * to materialize the slot to ensure it won't be freed. (Technically, we
-		 * do not need to do this if we're directly below the Unique node)
-		 */
-		ExecMaterializeSlot(result);
-		update_skip_key(state, result);
-	}
-	else if (state->distinct_col_state == SkipColumnFoundValAndNull || state->distinct_col_state == SkipColumnFoundNothing)
-		return result;
-	else
-	{
-		if (!state->found_first_tuple)
-			return result; /* nothing to find in the index, the non-skip-quals exclude everything */
-
-		/* We've run out of tuples from the underlying scan, but we may not be done.
-		 * NULL values don't participate in the normal ordering of values
-		 * (eg. in SQL column < NULL will never be true, and column < value
-		 * implies column IS NOT NULL), so they have to be handled specially.
-		 * Further, NULL values can be returned either before or after the other
-		 * values in the column depending on whether the index was declaed
-		 * NULLS FIRST or NULLS LAST. Therefore just because we've reached the
-		 * end of the IndexScan doesn't mean we're done; if we've only seen NULL
-		 * values that means we may be in a NULLS FIRST index, and we need to
-		 * check if a non-null value exists. Alternatively, if we haven't seen a
-		 * NULL, we may be in a NULLS LAST column, so we need to check if a NULL
-		 * value exists.
-		 */
-		if(!(state->distinct_col_state & SkipColumnFoundNull))
-			return skip_skan_search_for_null(state);
-		else if (!(state->distinct_col_state & SkipColumnFoundVal))
-			return skip_skan_search_for_nonnull(state);
-	}
-
-	return result;
-}
-
-static TupleTableSlot *
 skip_skan_search_for_null(SkipSkanState *state)
 {
+	Assert(skip_skan_state_found_val(state));
 	/* We haven't seen a NULL, redo the scan with the skip-qual set to
 	 * only allow NULL values, to see if there is a valid NULL to return.
-	 * We'll remove the SK_SEARCHNULL in update_skip_key.
 	 */
-	skip_skan_state_get_scankey(state, 0)->sk_flags = SK_SEARCHNULL | SK_ISNULL;
-	state->distinct_col_state |= SkipColumnFoundNull;
+	state->stage |= SkipSkanSearchingForNull;
 	if (state->reached_end != NULL)
 		*state->reached_end = false;
 	return skip_skan_exec(&state->cscan_state);
@@ -243,12 +317,12 @@ skip_skan_search_for_null(SkipSkanState *state)
 static TupleTableSlot *
 skip_skan_search_for_nonnull(SkipSkanState *state)
 {
+	Assert(skip_skan_state_found_null(state));
 	/* We only seen NULL values, redo the scan with the skip-qual set to
 	 * exclude NULL values, to see if there is are valid non-NULL values
-	 * to return. We'll remove the SK_SEARCHNOTNULL in update_skip_key.
+	 * to return.
 	 */
-	skip_skan_state_get_scankey(state, 0)->sk_flags = SK_SEARCHNOTNULL | SK_ISNULL;
-	state->distinct_col_state |= SkipColumnFoundVal;
+	state->stage |= SkipSkanSearchingForVal;
 	if (state->reached_end != NULL)
 		*state->reached_end = false;
 	return skip_skan_exec(&state->cscan_state);
@@ -257,34 +331,79 @@ skip_skan_search_for_nonnull(SkipSkanState *state)
 static void
 update_skip_key(SkipSkanState *state, TupleTableSlot *slot)
 {
-
-	/* if this is the first tuple we found, re-add our skip-qual to the list of quals */
-	skip_skan_state_readd_skip_qual_if_needed(state);
-
 	int col = state->distinct_col_attnum;
 
 	if (!state->prev_is_null && !state->distinct_by_val)
-	{
 		pfree(DatumGetPointer(state->prev_distinct_val));
-	}
 
 	MemoryContext old_ctx = MemoryContextSwitchTo(state->ctx);
 	state->prev_distinct_val = slot_getattr(slot, col, &state->prev_is_null);
-	if (!state->prev_is_null)
+	if (state->prev_is_null)
+	{
+		state->stage |= SkipSkanFoundNull;
+	}
+	else
+	{
+		state->stage |= SkipSkanFoundVal;
 		state->prev_distinct_val = datumCopy(state->prev_distinct_val,
 			state->distinct_by_val,
 			state->distinct_typ_len);
-	ScanKey key = skip_skan_state_get_scankey(state, 0);
+	}
+
+	MemoryContextSwitchTo(old_ctx);
+
+	/* if we were searching for an additional value after exhausting the
+	 * underlying Index(Only)Scan the first time, we just found it.
+	 */
+	state->stage &= ~SkipSkanSearchingForAdditional;
+}
+
+static void
+skip_skan_state_remove_skip_qual(SkipSkanState *state)
+{
+	Assert(*state->num_scan_keys >= 1);
+	Assert(!state->skip_qual_removed);
+	*state->num_scan_keys -= 1;
+	*state->scan_keys = *state->scan_keys + 1;
+	state->skip_qual_removed = true;
+}
+
+static inline bool
+skip_skan_state_readd_skip_qual_if_needed(SkipSkanState *state)
+{
+	if (state->skip_qual_removed)
+	{
+		*state->scan_keys = *state->scan_keys - 1;
+		*state->num_scan_keys += 1;
+		state->skip_qual_removed = false;
+		return true;
+	}
+	return false;
+}
+
+static inline void
+skip_skan_state_populate_skip_qual(SkipSkanState *state)
+{
+	ScanKey key = skip_skan_state_get_skipkey(state);
 	key->sk_argument = state->prev_distinct_val;
-	if (state->prev_is_null)
+	if (skip_skan_state_is_searching_for_null(state))
+	{
+		key->sk_flags = SK_SEARCHNULL | SK_ISNULL;
+	}
+	else if (skip_skan_state_is_searching_for_val(state))
+	{
+		key->sk_flags = SK_SEARCHNOTNULL | SK_ISNULL;
+	}
+	else if (state->prev_is_null)
 	{
 		/* Once we've seen a NULL we don't need another, so we remove the
 		 * SEARCHNULL to enable us to finish early, if that's what's driving
 		 * us.
 		 */
-		key->sk_flags &= ~SK_SEARCHNULL;
+		if (skip_skan_state_found_null(state))
+			key->sk_flags &= ~SK_SEARCHNULL;
+
 		key->sk_flags |= SK_ISNULL;
-		state->distinct_col_state |= SkipColumnFoundNull;
 	}
 	else
 	{
@@ -292,36 +411,10 @@ update_skip_key(SkipSkanState *state, TupleTableSlot *slot)
 		 * one, so remove SEARCHNOTNULL in case we were using that to find
 		 * the first non-NULL value.
 		 */
-		key->sk_flags &= ~(SK_ISNULL | SK_SEARCHNOTNULL);
-		state->distinct_col_state |= SkipColumnFoundVal;
-	}
-	MemoryContextSwitchTo(old_ctx);
+		if (skip_skan_state_found_val(state))
+			key->sk_flags &= ~SK_SEARCHNOTNULL;
 
-	if (!state->found_first_tuple)
-	{
-		/* if this is the first tuple we found */
-		skip_skan_state_beginscan(state);
-		state->found_first_tuple = true;
-	}
-
-	state->distinct_col_updated = true;
-}
-
-static void
-skip_skan_state_remove_skip_qual(SkipSkanState *state)
-{
-	Assert(*state->num_scan_keys >= 1);
-	*state->num_scan_keys -= 1;
-	*state->scan_keys = *state->scan_keys + 1;
-}
-
-static inline void
-skip_skan_state_readd_skip_qual_if_needed(SkipSkanState *state)
-{
-	if (!state->found_first_tuple)
-	{
-		*state->scan_keys = *state->scan_keys - 1;
-		*state->num_scan_keys += 1;
+		key->sk_flags &= ~SK_ISNULL;
 	}
 }
 
@@ -361,9 +454,7 @@ skip_skan_rescan(CustomScanState *node)
 
 	state->prev_distinct_val = 0;
 	state->prev_is_null = true;
-	state->distinct_col_state = SkipColumnFoundNothing;
-	state->found_first_tuple = false;
-	state->distinct_col_updated = false;
+	state->stage = SkipSkanSearchingForFirst;
 }
 
 static CustomExecMethods skip_skan_state_methods = {
