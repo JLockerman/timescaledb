@@ -4,6 +4,52 @@
  * LICENSE-TIMESCALE for a copy of the license.
  */
 
+/*
+ * SkipSkan is an optamized form of SELECT DISTINCT ON (column)
+ * Conceptually, a SkipSkan is a regular IndexScan with an additional skip-qual like
+ *     WHERE column > [previous value of column]
+ *
+ * Implementing this qual is complicated by two factors:
+ *   1. The first time through the SkipSkan there is no previous value for the
+ *      DISTINCT column.
+ *   2. NULL values don't behave nicely with ordering operators.
+ *
+ * To get around these issues, we have to special case those two cases. All in
+ * all, the SkipSkan's state machine evolves according to the following flowchart
+ *
+ *                  start
+ *                    |
+ *        +========================+
+ *        | search for first tuple |
+ *        +========================+
+ *           /               \
+ *     found NULL         found value
+ *        /                     \
+ * +============+          +============+
+ * | search for |--found-->| find value |
+ * |  non-NULL  |  value   | after prev |
+ * +============+          +============+
+ *       |                        |
+ *   found nothing           out of tuples
+ *       |                        |
+ *       |                  +=============+
+ *  /===========\           | search for  |
+ *  |   DONE    |<----------| NULL if one |
+ *  \===========/           | hasn't been |
+ *                          | found yet   |
+ *                          +=============+
+ *
+ * We start by calling the underlying IndexScan once, without the skip qual, to
+ * get the first tuple. If this tuple contains a NULL for our DISTINCT column, we
+ * assume we might be using a NULLs FIRST index, and search again with a
+ * `column IS NOT NULL` to see if we can find a real first value. If we find a
+ * first non-NULL value, we keep fetching nodes, updating our
+ * `column > [previous value of column]` all the while, until we run out of
+ * tuples. Once we run out of tuples, if we have not yet seen a NULL value, we
+ * search once more using `column IS NULL`, in case we are using a NULLs LAST
+ * index, after which we are done.
+ */
+
 #include <postgres.h>
 #include <access/htup_details.h>
 #include <access/visibilitymap.h>
@@ -436,16 +482,16 @@ skip_skan_rescan(CustomScanState *node)
 	SkipSkanState *state = (SkipSkanState *) node;
 	IndexScanDesc old_scan_desc = skip_skan_state_get_scandesc(state);
 	if(old_scan_desc != NULL)
-	{
 		index_endscan(old_scan_desc);
-		/* If we never found any values (which can happen if we have a qual on a
-		 * param that excludes all of the rows), we'll never have
-		 * called update_skip_key so the scan keys will still be setup to skip
-		 * the skip qual. Fix that here.
-		 */
-		skip_skan_state_readd_skip_qual_if_needed(state);
-	}
+
 	*state->scan_desc = NULL;
+
+	/* If we never found any values (which can happen if we have a qual on a
+	 * param that excludes all of the rows), we'll never have
+	 * called update_skip_key so the scan keys will still be setup to skip
+	 * the skip qual. Fix that here.
+	 */
+	skip_skan_state_readd_skip_qual_if_needed(state);
 
 	if (state->index_only_scan)
 		ExecReScanIndexOnlyScan(castNode(IndexOnlyScanState, state->idx));
