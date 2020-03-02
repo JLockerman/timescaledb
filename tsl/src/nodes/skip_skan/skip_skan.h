@@ -15,9 +15,9 @@
 typedef enum SkipColumnState
 {
 	SkipColumnFoundNothing = 0x0,
-	SkipColumnFoundMin = 0x1,
+	SkipColumnFoundVal = 0x1,
 	SkipColumnFoundNull = 0x2,
-	SkipColumnFoundMinAndNull = SkipColumnFoundNull | SkipColumnFoundMin,
+	SkipColumnFoundValAndNull = SkipColumnFoundNull | SkipColumnFoundVal,
 } SkipColumnState;
 
 typedef struct SkipSkanState
@@ -38,13 +38,13 @@ typedef struct SkipSkanState
 	Datum prev_distinct_val;
 	bool prev_is_null;
 
-	SkipColumnState column_state;
+	SkipColumnState distinct_col_state;
 
 	Buffer *index_only_buffer;
 	bool *reached_end;
 
-	bool found_first;
-	bool needs_rescan;
+	bool found_first_tuple;
+	bool distinct_col_updated;
 	bool index_only_scan;
 
 	Relation index_rel;

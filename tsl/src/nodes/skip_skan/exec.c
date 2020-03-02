@@ -106,14 +106,17 @@ skip_skan_begin(CustomScanState *node, EState *estate, int eflags)
 
 	state->prev_distinct_val = 0;
 	state->prev_is_null = true;
-	state->column_state = SkipColumnFoundNothing;
-	state->found_first = false;
-	state->needs_rescan = false;
+	state->distinct_col_state = SkipColumnFoundNothing;
+	state->found_first_tuple = false;
+	state->distinct_col_updated = false;
 }
 
 static void update_skip_key(SkipSkanState *state, TupleTableSlot *slot);
 static TupleTableSlot *skip_skan_search_for_null(SkipSkanState *state);
 static TupleTableSlot *skip_skan_search_for_nonnull(SkipSkanState *state);
+
+static void skip_skan_state_remove_skip_qual(SkipSkanState *state);
+static inline void skip_skan_state_readd_skip_qual_if_needed(SkipSkanState *state);
 
 static inline IndexScanDesc
 skip_skan_state_get_scandesc(SkipSkanState *state)
@@ -175,22 +178,20 @@ skip_skan_exec(CustomScanState *node)
 		 * skip previously seen values, we'll change back the number of scan keys
 		 * the first time through update_skip_key
 		 */
-		Assert(*state->num_scan_keys >= 1);
-		*state->num_scan_keys -= 1;
+		skip_skan_state_remove_skip_qual(state);
 		skip_skan_state_beginscan(state);
 
 		/* ignore the first scan key, which is the qual we add to skip repeat
 		 * values, the other quals still need to be applied. We'll set this back
 		 * once we have the inital values, and our qual can be applied.
 		 */
-		*state->scan_keys = *state->scan_keys + 1;
 		index_rescan(skip_skan_state_get_scandesc(state),
 			skip_skan_state_get_scankeys(state),
 			*state->num_scan_keys,
 			NULL /*orderbys*/,
 			0 /*norderbys*/);
 	}
-	else if (state->needs_rescan)
+	else if (state->distinct_col_updated)
 	{
 		/* in subsequent call we rescan based on the previously found element
 		 * which will have been set below in update_skip_key
@@ -214,11 +215,11 @@ skip_skan_exec(CustomScanState *node)
 		ExecMaterializeSlot(result);
 		update_skip_key(state, result);
 	}
-	else if (state->column_state == SkipColumnFoundMinAndNull || state->column_state == SkipColumnFoundNothing)
+	else if (state->distinct_col_state == SkipColumnFoundValAndNull || state->distinct_col_state == SkipColumnFoundNothing)
 		return result;
 	else
 	{
-		if (!state->found_first)
+		if (!state->found_first_tuple)
 			return result; /* nothing to find in the index, the non-skip-quals exclude everything */
 
 		/* We've run out of tuples from the underlying scan, but we may not be done.
@@ -234,9 +235,9 @@ skip_skan_exec(CustomScanState *node)
 		 * NULL, we may be in a NULLS LAST column, so we need to check if a NULL
 		 * value exists.
 		 */
-		if(!(state->column_state & SkipColumnFoundNull))
+		if(!(state->distinct_col_state & SkipColumnFoundNull))
 			return skip_skan_search_for_null(state);
-		else if (!(state->column_state & SkipColumnFoundMin))
+		else if (!(state->distinct_col_state & SkipColumnFoundVal))
 			return skip_skan_search_for_nonnull(state);
 	}
 
@@ -251,7 +252,7 @@ skip_skan_search_for_null(SkipSkanState *state)
 	 * We'll remove the SK_SEARCHNULL in update_skip_key.
 	 */
 	skip_skan_state_get_scankey(state, 0)->sk_flags = SK_SEARCHNULL | SK_ISNULL;
-	state->column_state |= SkipColumnFoundNull;
+	state->distinct_col_state |= SkipColumnFoundNull;
 	if (state->reached_end != NULL)
 		*state->reached_end = false;
 	return skip_skan_exec(&state->cscan_state);
@@ -265,7 +266,7 @@ skip_skan_search_for_nonnull(SkipSkanState *state)
 	 * to return. We'll remove the SK_SEARCHNOTNULL in update_skip_key.
 	 */
 	skip_skan_state_get_scankey(state, 0)->sk_flags = SK_SEARCHNOTNULL | SK_ISNULL;
-	state->column_state |= SkipColumnFoundMin;
+	state->distinct_col_state |= SkipColumnFoundVal;
 	if (state->reached_end != NULL)
 		*state->reached_end = false;
 	return skip_skan_exec(&state->cscan_state);
@@ -276,11 +277,7 @@ update_skip_key(SkipSkanState *state, TupleTableSlot *slot)
 {
 
 	/* if this is the first tuple we found, re-add our skip-qual to the list of quals */
-	if (!state->found_first)
-	{
-		*state->scan_keys = *state->scan_keys - 1;
-		*state->num_scan_keys += 1;
-	}
+	skip_skan_state_readd_skip_qual_if_needed(state);
 
 	int col = state->distinct_col_attnum;
 
@@ -305,7 +302,7 @@ update_skip_key(SkipSkanState *state, TupleTableSlot *slot)
 		 */
 		key->sk_flags &= ~SK_SEARCHNULL;
 		key->sk_flags |= SK_ISNULL;
-		state->column_state |= SkipColumnFoundNull;
+		state->distinct_col_state |= SkipColumnFoundNull;
 	}
 	else
 	{
@@ -314,18 +311,36 @@ update_skip_key(SkipSkanState *state, TupleTableSlot *slot)
 		 * the first non-NULL value.
 		 */
 		key->sk_flags &= ~(SK_ISNULL | SK_SEARCHNOTNULL);
-		state->column_state |= SkipColumnFoundMin;
+		state->distinct_col_state |= SkipColumnFoundVal;
 	}
 	MemoryContextSwitchTo(old_ctx);
 
-	if (!state->found_first)
+	if (!state->found_first_tuple)
 	{
 		/* if this is the first tuple we found */
 		skip_skan_state_beginscan(state);
-		state->found_first = true;
+		state->found_first_tuple = true;
 	}
 
-	state->needs_rescan = true;
+	state->distinct_col_updated = true;
+}
+
+static void
+skip_skan_state_remove_skip_qual(SkipSkanState *state)
+{
+	Assert(*state->num_scan_keys >= 1);
+	*state->num_scan_keys -= 1;
+	*state->scan_keys = *state->scan_keys + 1;
+}
+
+static inline void
+skip_skan_state_readd_skip_qual_if_needed(SkipSkanState *state)
+{
+	if (!state->found_first_tuple)
+	{
+		*state->scan_keys = *state->scan_keys - 1;
+		*state->num_scan_keys += 1;
+	}
 }
 
 
@@ -338,6 +353,7 @@ skip_skan_end(CustomScanState *node)
 	else
 		ExecEndIndexScan(castNode(IndexScanState, state->idx));
 }
+
 
 static void
 skip_skan_rescan(CustomScanState *node)
@@ -352,11 +368,7 @@ skip_skan_rescan(CustomScanState *node)
 		 * called update_skip_key so the scan keys will still be setup to skip
 		 * the skip qual. Fix that here.
 		 */
-		if (!state->found_first)
-		{
-			*state->scan_keys = *state->scan_keys - 1;
-			*state->num_scan_keys += 1;
-		}
+		skip_skan_state_readd_skip_qual_if_needed(state);
 	}
 	*state->scan_desc = NULL;
 
@@ -367,9 +379,9 @@ skip_skan_rescan(CustomScanState *node)
 
 	state->prev_distinct_val = 0;
 	state->prev_is_null = true;
-	state->column_state = SkipColumnFoundNothing;
-	state->found_first = false;
-	state->needs_rescan = false;
+	state->distinct_col_state = SkipColumnFoundNothing;
+	state->found_first_tuple = false;
+	state->distinct_col_updated = false;
 }
 
 static CustomExecMethods skip_skan_state_methods = {
