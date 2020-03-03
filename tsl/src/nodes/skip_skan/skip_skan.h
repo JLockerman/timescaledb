@@ -49,7 +49,11 @@ typedef struct SkipSkanState
 	int distinct_typ_len;
 
 	SkipSkanStage stage;
+
+	ScanKeyData skip_qual;
+	int skip_qual_offset;
 	bool skip_qual_removed;
+
 	bool index_only_scan;
 
 	Relation index_rel;

@@ -61,10 +61,27 @@
 #include "license.h"
 #include "nodes/skip_skan/skip_skan.h"
 
+
+static void skip_skan_state_beginscan(SkipSkanState *state);
+static void skip_skan_state_fixup_qual_order(SkipSkanState *state, IndexRuntimeKeyInfo *runtime_keys, int num_runtime_keys);
+static void update_skip_key(SkipSkanState *state, TupleTableSlot *slot);
+static TupleTableSlot *skip_skan_search_for_null(SkipSkanState *state);
+static TupleTableSlot *skip_skan_search_for_nonnull(SkipSkanState *state);
+
+static void skip_skan_state_remove_skip_qual(SkipSkanState *state);
+static inline bool skip_skan_state_readd_skip_qual_if_needed(SkipSkanState *state);
+static inline void skip_skan_state_populate_skip_qual(SkipSkanState *state);
+
+/*********
+ * Begin *
+ *********/
+
 static void
 skip_skan_begin(CustomScanState *node, EState *estate, int eflags)
 {
 	SkipSkanState *state = (SkipSkanState *) node;
+	IndexRuntimeKeyInfo *runtime_keys;
+	int num_runtime_keys;
 	if (IsA(state->idx_scan, IndexScan))
 	{
 		IndexScanState *idx = castNode(IndexScanState, ExecInitNode(state->idx_scan, estate, eflags));
@@ -73,12 +90,16 @@ skip_skan_begin(CustomScanState *node, EState *estate, int eflags)
 		node->custom_ps = list_make1(&idx->ss.ps);
 
 		state->idx = &idx->ss;
+
 		state->scan_keys = &idx->iss_ScanKeys;
 		state->num_scan_keys = &idx->iss_NumScanKeys;
 		state->index_rel = idx->iss_RelationDesc;
 		state->scan_desc = &idx->iss_ScanDesc;
 		state->index_only_buffer = NULL;
 		state->reached_end = &idx->iss_ReachedEnd;
+
+		runtime_keys = idx->iss_RuntimeKeys;
+		num_runtime_keys = idx->iss_NumRuntimeKeys;
 
 		/* we do not support orderByKeys out of conservatism; we do not know what,
 		 * if any, work would be required to support them. The planner should
@@ -100,8 +121,12 @@ skip_skan_begin(CustomScanState *node, EState *estate, int eflags)
 		state->index_rel = idx->ioss_RelationDesc;
 		state->scan_desc = &idx->ioss_ScanDesc;
 		state->index_only_buffer = &idx->ioss_VMBuffer;
+
 		/* IndexOnlyScan does not have a reached_end field */
 		state->reached_end = NULL;
+
+		runtime_keys = idx->ioss_RuntimeKeys;
+		num_runtime_keys = idx->ioss_NumRuntimeKeys;
 
 		/* we do not support orderByKeys out of conservatism; we do not know what,
 		 * if any, work would be required to support them.  The planner should
@@ -117,16 +142,59 @@ skip_skan_begin(CustomScanState *node, EState *estate, int eflags)
 	state->prev_is_null = true;
 	state->stage = SkipSkanSearchingForFirst;
 	state->skip_qual_removed = false;
+
+	/* in an EXPLAIN the scan_keys are never populated,
+	 * so we do not reorder them
+	 */
+	if (*state->num_scan_keys <= 0)
+		return;
+
+	state->skip_qual = (*state->scan_keys)[0];
+	state->skip_qual_offset = 0;
+
+	skip_skan_state_fixup_qual_order(state, runtime_keys, num_runtime_keys);
 }
 
-static void skip_skan_state_beginscan(SkipSkanState *state);
-static void update_skip_key(SkipSkanState *state, TupleTableSlot *slot);
-static TupleTableSlot *skip_skan_search_for_null(SkipSkanState *state);
-static TupleTableSlot *skip_skan_search_for_nonnull(SkipSkanState *state);
+/* ScanKeys must be ordered by index attribute, while we pu the skip qual at the
+ * front so it's easy to find. Now that it's in an easy-to-work-with form, move
+ * the skip key if the distinct-column is not the first one in the index
+ */
+static void
+skip_skan_state_fixup_qual_order(SkipSkanState *state, IndexRuntimeKeyInfo *runtime_keys, int num_runtime_keys)
+{
+	/* find the correct location for the skip qual, it should be the first qual
+	 * on its column
+	 */
+	while(true)
+	{
+		int i = state->skip_qual_offset + 1;
+		if (i >= *state->num_scan_keys)
+			break;
 
-static void skip_skan_state_remove_skip_qual(SkipSkanState *state);
-static inline bool skip_skan_state_readd_skip_qual_if_needed(SkipSkanState *state);
-static inline void skip_skan_state_populate_skip_qual(SkipSkanState *state);
+		ScanKey sk = &(*state->scan_keys)[i];
+		if (sk->sk_attno >= state->skip_qual.sk_attno)
+			break;
+
+		state->skip_qual_offset += 1;
+	}
+
+	Assert(state->skip_qual_offset < *state->num_scan_keys);
+
+	/* move the ScanKays if the skip key was in the wrong place */
+	if (state->skip_qual_offset > 0)
+	{
+		memmove((*state->scan_keys), (*state->scan_keys) + 1, sizeof(**state->scan_keys) * state->skip_qual_offset);
+		(*state->scan_keys)[state->skip_qual_offset] = state->skip_qual;
+		ScanKey skip_key = &(*state->scan_keys)[state->skip_qual_offset];
+
+		/* fix up any runtime keys whose location may have changed */
+		for (int i = 0; i < num_runtime_keys; i++)
+		{
+			if (runtime_keys[i].scan_key <= skip_key)
+				runtime_keys[i].scan_key -= 1;
+		}
+	}
+}
 
 
 /****************************
@@ -204,7 +272,7 @@ skip_skan_state_get_skipkey(SkipSkanState *state)
 {
 	Assert(!state->skip_qual_removed);
 	Assert(*state->num_scan_keys > 0);
-	return skip_skan_state_get_scankeys(state);
+	return &skip_skan_state_get_scankeys(state)[state->skip_qual_offset];
 }
 
 
@@ -390,8 +458,12 @@ skip_skan_state_remove_skip_qual(SkipSkanState *state)
 {
 	Assert(*state->num_scan_keys >= 1);
 	Assert(!state->skip_qual_removed);
+	ScanKey start = skip_skan_state_get_skipkey(state);
+	state->skip_qual = *start;
+	int keys_to_move = *state->num_scan_keys - state->skip_qual_offset - 1;
+	if (keys_to_move > 0)
+		memmove(start, start + 1, sizeof(*start) * keys_to_move);
 	*state->num_scan_keys -= 1;
-	*state->scan_keys = *state->scan_keys + 1;
 	state->skip_qual_removed = true;
 }
 
@@ -400,9 +472,15 @@ skip_skan_state_readd_skip_qual_if_needed(SkipSkanState *state)
 {
 	if (state->skip_qual_removed)
 	{
-		*state->scan_keys = *state->scan_keys - 1;
-		*state->num_scan_keys += 1;
 		state->skip_qual_removed = false;
+
+		int keys_to_move = *state->num_scan_keys - state->skip_qual_offset;
+		*state->num_scan_keys += 1;
+
+		ScanKey start = skip_skan_state_get_skipkey(state);
+		if (keys_to_move > 0)
+			memmove(start + 1, start, sizeof(*start) * keys_to_move);
+		*start = state->skip_qual;
 		return true;
 	}
 	return false;

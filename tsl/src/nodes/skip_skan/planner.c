@@ -267,9 +267,6 @@ create_index_skip_skan_path(PlannerInfo *root, UpperUniquePath *unique_path, Ind
 		elog(ERROR, "could not find col for SkipSKan");
 
 	int col = AttrNumberGetAttrOffset(*col_num);
-	/* we do not yet handle SkipSkans on keys other than the first key of the index */
-	if (col != 0)
-		return NULL;
 
 	int table_col = idx_info->indexkeys[col];
 	if(table_col == 0)
