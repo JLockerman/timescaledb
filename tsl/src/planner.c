@@ -9,6 +9,7 @@
 #include <planner.h>
 #include "planner.h"
 #include "nodes/gapfill/planner.h"
+#include "nodes/skip_skan/skip_skan.h"
 #include "nodes/compress_dml/compress_dml.h"
 #include "nodes/decompress_chunk/decompress_chunk.h"
 #include "chunk.h"
@@ -20,6 +21,8 @@ void
 tsl_create_upper_paths_hook(PlannerInfo *root, UpperRelationKind stage, RelOptInfo *input_rel,
 							RelOptInfo *output_rel)
 {
+	if (stage == UPPERREL_DISTINCT)
+		ts_add_skip_skan_paths(root, output_rel);
 	if (UPPERREL_GROUP_AGG == stage)
 		plan_add_gapfill(root, output_rel);
 	if (UPPERREL_WINDOW == stage)

@@ -45,6 +45,7 @@ bool ts_guc_enable_runtime_exclusion = true;
 bool ts_guc_enable_constraint_exclusion = true;
 bool ts_guc_enable_cagg_reorder_groupby = true;
 TSDLLEXPORT bool ts_guc_enable_transparent_decompression = true;
+TSDLLEXPORT bool ts_guc_enable_skip_skan = true;
 int ts_guc_max_open_chunks_per_insert = 10;
 int ts_guc_max_cached_chunks_per_hypertable = 10;
 int ts_guc_telemetry_level = TELEMETRY_DEFAULT;
@@ -174,6 +175,17 @@ _guc_init(void)
 							 "Enable transparent decompression",
 							 "Enable transparent decompression when querying hypertable",
 							 &ts_guc_enable_transparent_decompression,
+							 true,
+							 PGC_USERSET,
+							 0,
+							 NULL,
+							 NULL,
+							 NULL);
+
+	DefineCustomBoolVariable("timescaledb.enable_skipskan",
+							 "Enable SkipSkan",
+							 "Enable SkipSkan for DISTINCT queries",
+							 &ts_guc_enable_skip_skan,
 							 true,
 							 PGC_USERSET,
 							 0,
