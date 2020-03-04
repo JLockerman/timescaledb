@@ -34,6 +34,21 @@ SET timescaledb.enable_skipskan TO false;
 \set PREFIX 'INSERT INTO base_results(time, dev, val, test)'
 \ir include/skip_skan_test_query.sql
 
+-- Test that the multi-column DISTINCT emulation is equivalent to a real multi-column DISTINCT
+SELECT count(*) FROM
+   (SELECT DISTINCT ON (dev) dev FROM test_table) a,
+   LATERAL (SELECT DISTINCT ON (time) dev, time FROM test_table WHERE dev = a.dev) b;
+
+SELECT count(*) FROM (SELECT DISTINCT ON (dev, time) dev, time FROM test_table WHERE dev IS NOT NULL) c;
+
+SELECT count(*) FROM (
+   SELECT DISTINCT ON (dev, time) dev, time FROM test_table WHERE dev IS NOT NULL
+   UNION SELECT b.* FROM
+      (SELECT DISTINCT ON (dev) dev FROM test_table) a,
+      LATERAL (SELECT DISTINCT ON (time) dev, time FROM test_table WHERE dev = a.dev) b
+) u;
+
+-- Check that the SkipSkan results are identical to the regular results
 SELECT (skip_skan_results).* skip_skan, (base_results).* base
 FROM skip_skan_results FULL JOIN base_results ON skip_skan_results.idx = base_results.idx
 WHERE skip_skan_results.time != base_results.time

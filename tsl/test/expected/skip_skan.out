@@ -61,7 +61,21 @@ CREATE INDEX ON test_ht(dev, time);
 :PREFIX SELECT time, dev, val, 's' FROM (SELECT * FROM (
     VALUES (1), (2)) a(v),
     LATERAL (SELECT DISTINCT ON (dev) * FROM test_table WHERE dev >= a.v) b) c;
--- hypertable tests
+-- SkipSkan on later keys of an index
+:PREFIX SELECT time, NULL, NULL, 't' FROM (SELECT DISTINCT ON (time) time FROM test_table WHERE dev = 2) a;
+:PREFIX SELECT time, dev, val, 'u' FROM (SELECT DISTINCT ON (time) * FROM test_table WHERE dev = 2) a;
+-- Emulate multi-column DISTINCT using multiple SkipSkans
+:PREFIX SELECT time, dev, val, 'v' FROM (SELECT b.* FROM
+    (SELECT DISTINCT ON (dev) dev FROM test_table) a,
+    LATERAL (SELECT DISTINCT ON (time) * FROM test_table WHERE dev = a.dev) b) c;
+:PREFIX SELECT time, dev, NULL, 'w' FROM (SELECT b.* FROM
+    (SELECT DISTINCT ON (dev) dev FROM test_table) a,
+    LATERAL (SELECT DISTINCT ON (time) dev, time FROM test_table WHERE dev = a.dev) b) c;
+--------------------------
+--------------------------
+---- hypertable tests ----
+--------------------------
+--------------------------
 -- SkipSkan over IndexScan
 :PREFIX SELECT time, dev, val, 'a' FROM (SELECT DISTINCT ON (dev) * FROM test_ht) a;
 -- SkipSkan over IndexOnlyScan
@@ -96,6 +110,16 @@ CREATE INDEX ON test_ht(dev, time);
 :PREFIX SELECT time, dev, val, 's' FROM (SELECT * FROM (
     VALUES (1), (2)) a(v),
     LATERAL (SELECT DISTINCT ON (dev) * FROM test_ht WHERE dev >= a.v) b) c;
+-- SkipSkan on later keys of an index
+:PREFIX SELECT time, NULL, NULL, 't' FROM (SELECT DISTINCT ON (time) time FROM test_ht WHERE dev = 2) a;
+:PREFIX SELECT time, dev, val, 'u' FROM (SELECT DISTINCT ON (time) * FROM test_ht WHERE dev = 2) a;
+-- Emulate multi-column DISTINCT using multiple SkipSkans
+:PREFIX SELECT time, dev, val, 'v' FROM (SELECT b.* FROM
+    (SELECT DISTINCT ON (dev) dev FROM test_ht) a,
+    LATERAL (SELECT DISTINCT ON (time) * FROM test_ht WHERE dev = a.dev) b) c;
+:PREFIX SELECT time, dev, NULL, 'w' FROM (SELECT b.* FROM
+    (SELECT DISTINCT ON (dev) dev FROM test_ht) a,
+    LATERAL (SELECT DISTINCT ON (time) dev, time FROM test_ht WHERE dev = a.dev) b) c;
 SET timescaledb.enable_skipskan TO false;
 \set PREFIX 'INSERT INTO base_results(time, dev, val, test)'
 \ir include/skip_skan_test_query.sql
@@ -136,7 +160,21 @@ SET timescaledb.enable_skipskan TO false;
 :PREFIX SELECT time, dev, val, 's' FROM (SELECT * FROM (
     VALUES (1), (2)) a(v),
     LATERAL (SELECT DISTINCT ON (dev) * FROM test_table WHERE dev >= a.v) b) c;
--- hypertable tests
+-- SkipSkan on later keys of an index
+:PREFIX SELECT time, NULL, NULL, 't' FROM (SELECT DISTINCT ON (time) time FROM test_table WHERE dev = 2) a;
+:PREFIX SELECT time, dev, val, 'u' FROM (SELECT DISTINCT ON (time) * FROM test_table WHERE dev = 2) a;
+-- Emulate multi-column DISTINCT using multiple SkipSkans
+:PREFIX SELECT time, dev, val, 'v' FROM (SELECT b.* FROM
+    (SELECT DISTINCT ON (dev) dev FROM test_table) a,
+    LATERAL (SELECT DISTINCT ON (time) * FROM test_table WHERE dev = a.dev) b) c;
+:PREFIX SELECT time, dev, NULL, 'w' FROM (SELECT b.* FROM
+    (SELECT DISTINCT ON (dev) dev FROM test_table) a,
+    LATERAL (SELECT DISTINCT ON (time) dev, time FROM test_table WHERE dev = a.dev) b) c;
+--------------------------
+--------------------------
+---- hypertable tests ----
+--------------------------
+--------------------------
 -- SkipSkan over IndexScan
 :PREFIX SELECT time, dev, val, 'a' FROM (SELECT DISTINCT ON (dev) * FROM test_ht) a;
 -- SkipSkan over IndexOnlyScan
@@ -171,6 +209,43 @@ SET timescaledb.enable_skipskan TO false;
 :PREFIX SELECT time, dev, val, 's' FROM (SELECT * FROM (
     VALUES (1), (2)) a(v),
     LATERAL (SELECT DISTINCT ON (dev) * FROM test_ht WHERE dev >= a.v) b) c;
+-- SkipSkan on later keys of an index
+:PREFIX SELECT time, NULL, NULL, 't' FROM (SELECT DISTINCT ON (time) time FROM test_ht WHERE dev = 2) a;
+:PREFIX SELECT time, dev, val, 'u' FROM (SELECT DISTINCT ON (time) * FROM test_ht WHERE dev = 2) a;
+-- Emulate multi-column DISTINCT using multiple SkipSkans
+:PREFIX SELECT time, dev, val, 'v' FROM (SELECT b.* FROM
+    (SELECT DISTINCT ON (dev) dev FROM test_ht) a,
+    LATERAL (SELECT DISTINCT ON (time) * FROM test_ht WHERE dev = a.dev) b) c;
+:PREFIX SELECT time, dev, NULL, 'w' FROM (SELECT b.* FROM
+    (SELECT DISTINCT ON (dev) dev FROM test_ht) a,
+    LATERAL (SELECT DISTINCT ON (time) dev, time FROM test_ht WHERE dev = a.dev) b) c;
+-- Test that the multi-column DISTINCT emulation is equivalent to a real multi-column DISTINCT
+SELECT count(*) FROM
+   (SELECT DISTINCT ON (dev) dev FROM test_table) a,
+   LATERAL (SELECT DISTINCT ON (time) dev, time FROM test_table WHERE dev = a.dev) b;
+ count 
+-------
+ 10001
+(1 row)
+
+SELECT count(*) FROM (SELECT DISTINCT ON (dev, time) dev, time FROM test_table WHERE dev IS NOT NULL) c;
+ count 
+-------
+ 10001
+(1 row)
+
+SELECT count(*) FROM (
+   SELECT DISTINCT ON (dev, time) dev, time FROM test_table WHERE dev IS NOT NULL
+   UNION SELECT b.* FROM
+      (SELECT DISTINCT ON (dev) dev FROM test_table) a,
+      LATERAL (SELECT DISTINCT ON (time) dev, time FROM test_table WHERE dev = a.dev) b
+) u;
+ count 
+-------
+ 10001
+(1 row)
+
+-- Check that the SkipSkan results are identical to the regular results
 SELECT (skip_skan_results).* skip_skan, (base_results).* base
 FROM skip_skan_results FULL JOIN base_results ON skip_skan_results.idx = base_results.idx
 WHERE skip_skan_results.time != base_results.time

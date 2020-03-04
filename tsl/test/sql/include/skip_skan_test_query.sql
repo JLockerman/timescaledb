@@ -48,7 +48,26 @@
     LATERAL (SELECT DISTINCT ON (dev) * FROM test_table WHERE dev >= a.v) b) c;
 
 
--- hypertable tests
+-- SkipSkan on later keys of an index
+:PREFIX SELECT time, NULL, NULL, 't' FROM (SELECT DISTINCT ON (time) time FROM test_table WHERE dev = 2) a;
+:PREFIX SELECT time, dev, val, 'u' FROM (SELECT DISTINCT ON (time) * FROM test_table WHERE dev = 2) a;
+
+-- Emulate multi-column DISTINCT using multiple SkipSkans
+:PREFIX SELECT time, dev, val, 'v' FROM (SELECT b.* FROM
+    (SELECT DISTINCT ON (dev) dev FROM test_table) a,
+    LATERAL (SELECT DISTINCT ON (time) * FROM test_table WHERE dev = a.dev) b) c;
+
+:PREFIX SELECT time, dev, NULL, 'w' FROM (SELECT b.* FROM
+    (SELECT DISTINCT ON (dev) dev FROM test_table) a,
+    LATERAL (SELECT DISTINCT ON (time) dev, time FROM test_table WHERE dev = a.dev) b) c;
+
+
+--------------------------
+--------------------------
+---- hypertable tests ----
+--------------------------
+--------------------------
+
 -- SkipSkan over IndexScan
 :PREFIX SELECT time, dev, val, 'a' FROM (SELECT DISTINCT ON (dev) * FROM test_ht) a;
 
@@ -92,3 +111,16 @@
 :PREFIX SELECT time, dev, val, 's' FROM (SELECT * FROM (
     VALUES (1), (2)) a(v),
     LATERAL (SELECT DISTINCT ON (dev) * FROM test_ht WHERE dev >= a.v) b) c;
+
+-- SkipSkan on later keys of an index
+:PREFIX SELECT time, NULL, NULL, 't' FROM (SELECT DISTINCT ON (time) time FROM test_ht WHERE dev = 2) a;
+:PREFIX SELECT time, dev, val, 'u' FROM (SELECT DISTINCT ON (time) * FROM test_ht WHERE dev = 2) a;
+
+-- Emulate multi-column DISTINCT using multiple SkipSkans
+:PREFIX SELECT time, dev, val, 'v' FROM (SELECT b.* FROM
+    (SELECT DISTINCT ON (dev) dev FROM test_ht) a,
+    LATERAL (SELECT DISTINCT ON (time) * FROM test_ht WHERE dev = a.dev) b) c;
+
+:PREFIX SELECT time, dev, NULL, 'w' FROM (SELECT b.* FROM
+    (SELECT DISTINCT ON (dev) dev FROM test_ht) a,
+    LATERAL (SELECT DISTINCT ON (time) dev, time FROM test_ht WHERE dev = a.dev) b) c;
